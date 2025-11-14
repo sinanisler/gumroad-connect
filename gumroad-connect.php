@@ -3,7 +3,7 @@
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
  * Description: Connect your WordPress site with Gumroad to receive real-time sale notifications via webhooks
- * Version: 1.6
+ * Version: 1.7
  * Author: sinanisler
  * Author URI: https://sinanisler.com
  * License: GPL v2 or later
@@ -442,6 +442,8 @@ class Gumroad_Connect {
                                     />
                                     <p class="description">
                                         Your Gumroad seller ID. This will be verified against incoming pings for security.
+                                        <br> Find your seller id in same place under the 
+                                        <a href="https://gumroad.com/settings/advanced" target="_blank">ping input setting</a>.
                                     </p>
                                 </td>
                             </tr>
