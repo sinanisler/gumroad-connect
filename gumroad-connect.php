@@ -438,7 +438,7 @@ class Gumroad_Connect {
                                         name="<?php echo esc_attr($this->option_name); ?>[seller_id]" 
                                         value="<?php echo esc_attr($seller_id); ?>" 
                                         class="regular-text"
-                                        placeholder="RcuODgh_9NOtnSKD_lDMfg=="
+                                        placeholder="RcuODgh_........"
                                     />
                                     <p class="description">
                                         Your Gumroad seller ID. This will be verified against incoming pings for security.
