@@ -3,7 +3,7 @@
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
  * Description: Connect your WordPress site with Gumroad to receive real-time sale notifications via webhooks
- * Version: 1.3
+ * Version: 1.4
  * Author: sinanisler
  * Author URI: https://sinanisler.com
  * License: GPL v2 or later
@@ -376,10 +376,10 @@ class Gumroad_Connect {
             ),
         );
         
-        // Store in user log (keep last 50 entries)
+        // Store in user log (keep last 100 entries)
         $user_log = get_option($this->user_log_option, array());
         array_unshift($user_log, $log_entry);
-        $user_log = array_slice($user_log, 0, 50);
+        $user_log = array_slice($user_log, 0, 100);
         update_option($this->user_log_option, $user_log);
     }
     
@@ -744,6 +744,14 @@ class Gumroad_Connect {
         
         $user_log = get_option($this->user_log_option, array());
         
+        // Pagination
+        $per_page = 100;
+        $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+        $total_entries = count($user_log);
+        $total_pages = ceil($total_entries / $per_page);
+        $offset = ($current_page - 1) * $per_page;
+        $paged_log = array_slice($user_log, $offset, $per_page);
+        
         ?>
         <div class="wrap gumroad-connect-wrap">
             <h1>👥 Gumroad Connect - User Log</h1>
@@ -770,7 +778,13 @@ class Gumroad_Connect {
                 
                 <!-- User Log Entries -->
                 <div class="gumroad-card">
-                    <h2>👤 User Actions (Last 50)</h2>
+                    <h2>👤 User Actions (Last 100)</h2>
+                    
+                    <?php if ($total_entries > 0): ?>
+                        <div class="log-stats">
+                            <p>Showing <?php echo count($paged_log); ?> of <?php echo $total_entries; ?> entries (Page <?php echo $current_page; ?> of <?php echo $total_pages; ?>)</p>
+                        </div>
+                    <?php endif; ?>
                     
                     <?php if (empty($user_log)): ?>
                         <div class="no-pings">
@@ -778,7 +792,7 @@ class Gumroad_Connect {
                             <p>Users will appear here when they're created through Gumroad purchases.</p>
                         </div>
                     <?php else: ?>
-                        <?php foreach ($user_log as $index => $entry): ?>
+                        <?php foreach ($paged_log as $index => $entry): ?>
                             <?php 
                             $result = $entry['result'];
                             $status = $result['status'];
@@ -803,7 +817,7 @@ class Gumroad_Connect {
                             
                             <div class="user-log-entry <?php echo esc_attr($status_class); ?>">
                                 <div class="user-log-header">
-                                    <strong><?php echo $status_icon; ?> Action #<?php echo ($index + 1); ?></strong>
+                                    <strong><?php echo $status_icon; ?> Action #<?php echo ($offset + $index + 1); ?></strong>
                                     <span class="user-log-time"><?php echo esc_html($entry['datetime_readable']); ?></span>
                                     <span class="badge badge-status"><?php echo esc_html(ucfirst($status)); ?></span>
                                 </div>
@@ -873,6 +887,36 @@ class Gumroad_Connect {
                                 </div>
                             </div>
                         <?php endforeach; ?>
+                        
+                        <!-- Pagination -->
+                        <?php if ($total_pages > 1): ?>
+                            <div class="tablenav">
+                                <div class="tablenav-pages">
+                                    <span class="displaying-num"><?php echo $total_entries; ?> items</span>
+                                    <span class="pagination-links">
+                                        <?php
+                                        $base_url = admin_url('admin.php?page=gumroad-connect-users');
+                                        
+                                        if ($current_page > 1) {
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=1') . '">« First</a> ';
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . ($current_page - 1)) . '">‹ Previous</a> ';
+                                        }
+                                        
+                                        echo '<span class="paging-input">';
+                                        echo '<span class="tablenav-paging-text">';
+                                        echo $current_page . ' of <span class="total-pages">' . $total_pages . '</span>';
+                                        echo '</span>';
+                                        echo '</span> ';
+                                        
+                                        if ($current_page < $total_pages) {
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . ($current_page + 1)) . '">Next ›</a> ';
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . $total_pages) . '">Last »</a>';
+                                        }
+                                        ?>
+                                    </span>
+                                </div>
+                            </div>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </div>
                 
@@ -1163,6 +1207,48 @@ class Gumroad_Connect {
         
         .user-log-content details summary:hover {
             background: #dcdcde;
+        }
+        
+        /* Pagination Styles */
+        .tablenav {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f6f7f7;
+            border-radius: 4px;
+        }
+        
+        .tablenav-pages {
+            text-align: center;
+        }
+        
+        .displaying-num {
+            margin-right: 15px;
+            color: #666;
+        }
+        
+        .pagination-links {
+            display: inline-block;
+        }
+        
+        .pagination-links .button {
+            margin: 0 3px;
+        }
+        
+        .paging-input {
+            margin: 0 10px;
+        }
+        
+        .log-stats {
+            background: #f6f7f7;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        
+        .log-stats p {
+            margin: 0;
+            color: #666;
+            font-size: 13px;
         }
         ';
     }
