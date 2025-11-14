@@ -433,7 +433,7 @@ class Gumroad_Connect {
                                 </th>
                                 <td>
                                     <input 
-                                        type="text" 
+                                        type="password" 
                                         id="seller_id" 
                                         name="<?php echo esc_attr($this->option_name); ?>[seller_id]" 
                                         value="<?php echo esc_attr($seller_id); ?>" 
