@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name: Gumroad Connect
- * Plugin URI: https://example.com/gumroad-connect
+ * Plugin URI: https://github.com/sinanisler/gumroad-connect
  * Description: Connect your WordPress site with Gumroad to receive real-time sale notifications via webhooks
  * Version: 1.0.0
- * Author: Your Name
- * Author URI: https://example.com
+ * Author: sinanisler
+ * Author URI: https://sinanisler.com
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: gumroad-connect
