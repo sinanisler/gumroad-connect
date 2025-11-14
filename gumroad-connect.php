@@ -442,7 +442,6 @@ class Gumroad_Connect {
                                     />
                                     <p class="description">
                                         Your Gumroad seller ID. This will be verified against incoming pings for security.
-                                        <br><strong>Your seller_id:</strong> <code>RcuODgh_9NOtnSKD_lDMfg==</code>
                                     </p>
                                 </td>
                             </tr>
