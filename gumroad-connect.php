@@ -562,9 +562,9 @@ class Gumroad_Connect {
                         <ol>
                             <li>Enter your <strong>Seller ID</strong> above and save settings</li>
                             <li>Enable "Auto Create Users" and select desired roles</li>
-                            <li>Copy the webhook endpoint URL above</li>
+                            <li>Copy the ping endpoint URL above</li>
                             <li>Go to your <a href="https://app.gumroad.com/settings" target="_blank">Gumroad Account Settings</a></li>
-                            <li>Find the <strong>"Ping"</strong> or <strong>"Webhooks"</strong> section</li>
+                            <li>Find the <strong>"Ping"</strong> setting</li>
                             <li>Paste the endpoint URL</li>
                             <li>Test the connection using the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-test'); ?>">Ping Test</a> page</li>
                         </ol>
