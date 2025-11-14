@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
- * Description: Connect your WordPress site with Gumroad to receive real-time sale notifications via webhooks
+ * Description: Connect your WordPress site with Gumroad to automatically create user accounts when customers make a purchase.
  * Version: 1.10
  * Author: sinanisler
  * Author URI: https://sinanisler.com
