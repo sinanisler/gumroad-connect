@@ -40,7 +40,7 @@ class Gumroad_Connect {
     }
     
     /**
-     * Activate plugin - Create custom role
+     * Activate plugin - Create custom role and generate endpoint hash
      */
     public function activate_plugin() {
         // Get subscriber capabilities
@@ -50,6 +50,33 @@ class Gumroad_Connect {
             // Add custom "paidmember" role with subscriber capabilities
             add_role('paidmember', 'Paid Member', $subscriber->capabilities);
         }
+        
+        // Generate unique endpoint hash if not exists
+        if (!get_option('gumroad_connect_endpoint_hash')) {
+            $this->generate_endpoint_hash();
+        }
+    }
+    
+    /**
+     * Generate unique endpoint hash based on domain
+     */
+    private function generate_endpoint_hash() {
+        $domain = get_site_url();
+        $salt = wp_generate_password(32, true, true);
+        $hash = substr(md5($domain . $salt . time()), 0, 16);
+        update_option('gumroad_connect_endpoint_hash', $hash);
+        return $hash;
+    }
+    
+    /**
+     * Get endpoint hash
+     */
+    private function get_endpoint_hash() {
+        $hash = get_option('gumroad_connect_endpoint_hash');
+        if (!$hash) {
+            $hash = $this->generate_endpoint_hash();
+        }
+        return $hash;
     }
     
     /**
@@ -138,7 +165,9 @@ class Gumroad_Connect {
      * Register REST API route
      */
     public function register_rest_route() {
-        register_rest_route('gumroad-connect/v1', '/ping', array(
+        $endpoint_hash = $this->get_endpoint_hash();
+        
+        register_rest_route('gumroad-connect/v1', '/ping/' . $endpoint_hash, array(
             'methods' => 'POST',
             'callback' => array($this, 'handle_ping'),
             'permission_callback' => '__return_true', // Public endpoint
@@ -405,8 +434,9 @@ class Gumroad_Connect {
         $email_subject = isset($settings['email_subject']) ? $settings['email_subject'] : 'Welcome! Your Account Has Been Created';
         $email_message = isset($settings['email_message']) ? $settings['email_message'] : '';
         
-        // Get the REST endpoint URL
-        $endpoint_url = rest_url('gumroad-connect/v1/ping');
+        // Get the REST endpoint URL with unique hash
+        $endpoint_hash = $this->get_endpoint_hash();
+        $endpoint_url = rest_url('gumroad-connect/v1/ping/' . $endpoint_hash);
         
         // Get all available roles
         $wp_roles = wp_roles();
@@ -556,6 +586,10 @@ class Gumroad_Connect {
                         <button type="button" class="button button-primary" onclick="copyEndpointUrl()">
                             📋 Copy URL
                         </button>
+                    </div>
+                    
+                    <div class="security-notice">
+                        <p><strong>🔒 Security Feature:</strong> This URL contains a unique hash that makes it impossible to guess. Only you know this URL, so unauthorized pings will receive a 404 error.</p>
                     </div>
                     
                     <div class="endpoint-instructions">
@@ -1251,9 +1285,25 @@ class Gumroad_Connect {
             color: #666;
             font-size: 13px;
         }
+        
+        .security-notice {
+            background: #e7f5e7;
+            border-left: 4px solid #46b450;
+            padding: 12px 15px;
+            margin-top: 15px;
+            border-radius: 4px;
+        }
+        
+        .security-notice p {
+            margin: 0;
+            color: #2c662d;
+        }
         ';
     }
 }
+
+// Initialize the plugin
+new Gumroad_Connect();
 
 // Initialize the plugin
 new Gumroad_Connect();
