@@ -1,6 +1,6 @@
 # Gumroad Connect
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sinanisler/snn-brx-child-theme)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sinanisler/gumroad-connect)
 [![Sponsor me](https://img.shields.io/badge/Sponsor_The_Project_❤-GitHub-d46)](https://github.com/sponsors/sinanisler)
 
 
