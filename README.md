@@ -6,7 +6,7 @@ Connect your WordPress site with Gumroad PING WEBHOOK to automatically create us
 ## Tutorial Video
 
 <a href="https://www.youtube.com/watch?v=nHEwipRdOxk">
-<img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/6f5f8394-5f96-42f1-bb34-01194743fca4" />
+<img width="627" height="357" alt="image" src="https://github.com/user-attachments/assets/eca4cb3b-a9cb-4e4e-92d5-718f7ed54bf9" />
 </a>
 
 
