@@ -21,6 +21,7 @@ class Gumroad_Connect {
     private $option_name = 'gumroad_connect_settings';
     private $ping_log_option = 'gumroad_connect_ping_log';
     private $user_log_option = 'gumroad_connect_user_log';
+    private $products_option = 'gumroad_connect_products';
     
     public function __construct() {
         // Plugin activation
@@ -158,6 +159,10 @@ class Gumroad_Connect {
             $sanitized['email_message'] = wp_kses_post($input['email_message']);
         }
         
+        if (isset($input['selected_products']) && is_array($input['selected_products'])) {
+            $sanitized['selected_products'] = array_map('sanitize_text_field', $input['selected_products']);
+        }
+        
         return $sanitized;
     }
     
@@ -208,10 +213,29 @@ class Gumroad_Connect {
         $ping_log = array_slice($ping_log, 0, 20);
         update_option($this->ping_log_option, $ping_log);
         
+        // Store product information for selection in settings
+        if (isset($params['short_product_id']) && isset($params['product_name'])) {
+            $this->store_product_info($params['short_product_id'], $params['product_name']);
+        }
+        
         // Process user creation if enabled and verified
         $user_creation_result = null;
         if ($create_users && $seller_id_match && isset($params['email'])) {
-            $user_creation_result = $this->create_or_update_user($params);
+            // Check if product selection is enabled and if this product is selected
+            $selected_products = isset($settings['selected_products']) ? $settings['selected_products'] : array();
+            $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+            
+            // If no products are selected, create users for all purchases (backward compatibility)
+            // If products are selected, only create users for selected products
+            if (empty($selected_products) || in_array($short_product_id, $selected_products)) {
+                $user_creation_result = $this->create_or_update_user($params);
+            } else {
+                $user_creation_result = array(
+                    'status' => 'skipped',
+                    'message' => 'Product not selected for user creation',
+                    'product_id' => $short_product_id,
+                );
+            }
         }
         
         // Return success response
@@ -222,6 +246,28 @@ class Gumroad_Connect {
             'seller_id_verified' => $seller_id_match,
             'user_created' => $user_creation_result,
         ), 200);
+    }
+    
+    /**
+     * Store product information from ping
+     */
+    private function store_product_info($short_product_id, $product_name) {
+        $products = get_option($this->products_option, array());
+        
+        // Store or update product info with short_product_id as key
+        if (!isset($products[$short_product_id])) {
+            $products[$short_product_id] = array(
+                'name' => $product_name,
+                'first_seen' => current_time('mysql'),
+                'last_seen' => current_time('mysql'),
+            );
+        } else {
+            // Update product name and last seen time
+            $products[$short_product_id]['name'] = $product_name;
+            $products[$short_product_id]['last_seen'] = current_time('mysql');
+        }
+        
+        update_option($this->products_option, $products);
     }
     
     /**
@@ -433,6 +479,7 @@ class Gumroad_Connect {
         $user_roles = isset($settings['user_roles']) ? $settings['user_roles'] : array('paidmember', 'subscriber');
         $email_subject = isset($settings['email_subject']) ? $settings['email_subject'] : 'Welcome! Your Account Has Been Created';
         $email_message = isset($settings['email_message']) ? $settings['email_message'] : '';
+        $selected_products = isset($settings['selected_products']) ? $settings['selected_products'] : array();
         
         // Get the REST endpoint URL with unique hash
         $endpoint_hash = $this->get_endpoint_hash();
@@ -441,6 +488,9 @@ class Gumroad_Connect {
         // Get all available roles
         $wp_roles = wp_roles();
         $available_roles = $wp_roles->get_names();
+        
+        // Get stored products from pings
+        $stored_products = get_option($this->products_option, array());
         
         ?>
         <div class="wrap gumroad-connect-wrap">
@@ -524,6 +574,40 @@ class Gumroad_Connect {
                                         Select which role(s) to assign to newly created users. You can select multiple roles.<br>
                                         <strong>Recommended:</strong> "Paid Member" (custom) + "Subscriber" (default)
                                     </p>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label>Select Products for User Creation</label>
+                                </th>
+                                <td>
+                                    <?php if (empty($stored_products)): ?>
+                                        <p class="description" style="color: #dc3232;">
+                                            ⚠️ No products detected yet. Make a test purchase or wait for a real sale to see your products here.
+                                        </p>
+                                    <?php else: ?>
+                                        <fieldset>
+                                            <p class="description" style="margin-bottom: 10px;">
+                                                Select which products should trigger user creation. Leave all unchecked to create users for <strong>all purchases</strong> (default behavior).
+                                            </p>
+                                            <?php foreach ($stored_products as $product_id => $product_info): ?>
+                                                <label style="display: block; margin-bottom: 8px; padding: 8px; background: #f6f7f7; border-radius: 4px;">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        name="<?php echo esc_attr($this->option_name); ?>[selected_products][]" 
+                                                        value="<?php echo esc_attr($product_id); ?>"
+                                                        <?php checked(in_array($product_id, $selected_products)); ?>
+                                                    />
+                                                    <strong><?php echo esc_html($product_info['name']); ?></strong>
+                                                    <code style="margin-left: 10px; color: #666;"><?php echo esc_html($product_id); ?></code>
+                                                </label>
+                                            <?php endforeach; ?>
+                                        </fieldset>
+                                        <p class="description" style="margin-top: 10px;">
+                                            💡 <strong>Tip:</strong> This allows you to have multiple products on Gumroad but only create WordPress users for specific products.
+                                        </p>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                             
@@ -846,6 +930,10 @@ class Gumroad_Connect {
                                 case 'error':
                                     $status_class = 'status-error';
                                     $status_icon = '❌';
+                                    break;
+                                case 'skipped':
+                                    $status_class = 'status-skipped';
+                                    $status_icon = '⏭️';
                                     break;
                             }
                             ?>
@@ -1187,6 +1275,11 @@ class Gumroad_Connect {
         .user-log-entry.status-error {
             border-color: #dc3232;
             background: #fef7f7;
+        }
+        
+        .user-log-entry.status-skipped {
+            border-color: #999;
+            background: #f5f5f5;
         }
         
         .user-log-header {
