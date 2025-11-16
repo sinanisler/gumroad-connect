@@ -16,6 +16,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Include GitHub auto-update functionality
+require_once plugin_dir_path(__FILE__) . 'include/github-update.php';
+
 class Gumroad_Connect {
     
     private $option_name = 'gumroad_connect_settings';
