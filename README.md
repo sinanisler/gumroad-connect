@@ -1,7 +1,9 @@
 # Gumroad Connect
 
+[![Sponsor me](https://img.shields.io/badge/Consider_Supporting_My_Projects_❤-GitHub-d46)](https://github.com/sponsors/sinanisler)
+
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sinanisler/gumroad-connect)
-[![Sponsor me](https://img.shields.io/badge/Sponsor_The_Project_❤-GitHub-d46)](https://github.com/sponsors/sinanisler)
 
 
 Connect your WordPress site with Gumroad PING WEBHOOK to automatically create user accounts when customers make a purchase.
