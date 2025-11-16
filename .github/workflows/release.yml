@@ -40,6 +40,28 @@ jobs:
           git commit -m "Bump version to ${{ env.new_version }}"
           git push
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the latest tag (previous version)
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          # Generate changelog
+          if [ -z "$latest_tag" ]; then
+            # If no previous tag exists, get all commits
+            changelog=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            # Get commits since the last tag
+            changelog=$(git log ${latest_tag}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Save changelog to file and environment
+          echo "$changelog" > CHANGELOG.txt
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$changelog" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "previous_tag=$latest_tag" >> $GITHUB_ENV
+
       - name: Create zip file
         run: |
           mkdir -p gumroad-connect
@@ -54,7 +76,14 @@ jobs:
           files: gumroad-connect.zip
           tag_name: "v${{ env.new_version }}"
           name: "Release v${{ env.new_version }}"
-          body: "Release v${{ env.new_version }} of the plugin."
+          body: |
+            ## Release v${{ env.new_version }}
+            
+            ### Changes in this release:
+            ${{ env.CHANGELOG }}
+            
+            ---
+            **Full Changelog**: ${{ env.previous_tag != '' && format('https://github.com/sinanisler/gumroad-connect/compare/{0}...v{1}', env.previous_tag, env.new_version) || format('https://github.com/sinanisler/gumroad-connect/commits/v{0}', env.new_version) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,6 +95,14 @@ jobs:
           files: gumroad-connect.zip
           tag_name: "pre-v${{ env.version }}"
           name: "Pre-release v${{ env.version }}"
-          body: "Pre-release v${{ env.version }} of the plugin."
+          body: |
+            ## Pre-release v${{ env.version }}
+            
+            ### Changes in this pre-release:
+            ${{ env.CHANGELOG }}
+            
+            ---
+            **Note**: This is a pre-release version for testing purposes.
+            **Full Changelog**: ${{ env.previous_tag != '' && format('https://github.com/sinanisler/gumroad-connect/compare/{0}...pre-v{1}', env.previous_tag, env.version) || format('https://github.com/sinanisler/gumroad-connect/commits/pre-v{0}', env.version) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
