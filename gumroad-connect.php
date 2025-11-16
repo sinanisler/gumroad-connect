@@ -473,6 +473,12 @@ class Gumroad_Connect {
      * Settings page
      */
     public function settings_page() {
+        // Handle hash refresh action
+        if (isset($_POST['refresh_endpoint_hash']) && check_admin_referer('gumroad_refresh_hash')) {
+            $this->generate_endpoint_hash();
+            echo '<div class="notice notice-success"><p><strong>✅ Endpoint hash refreshed successfully!</strong> Make sure to update your Gumroad webhook URL with the new endpoint.</p></div>';
+        }
+        
         $settings = get_option($this->option_name, array());
         $seller_id = isset($settings['seller_id']) ? $settings['seller_id'] : '';
         $create_users = isset($settings['create_users']) ? $settings['create_users'] : true;
@@ -674,6 +680,29 @@ class Gumroad_Connect {
                     
                     <div class="security-notice">
                         <p><strong>🔒 Security Feature:</strong> This URL contains a unique hash that makes it impossible to guess. Only you know this URL, so unauthorized pings will receive a 404 error.</p>
+                    </div>
+                    
+                    <!-- Refresh Hash Section -->
+                    <div class="refresh-hash-section">
+                        <h3>🔄 Refresh Endpoint Hash</h3>
+                        <p>If your endpoint URL has been accidentally exposed or compromised, you can generate a new secure hash below.</p>
+                        
+                        <form method="post" onsubmit="return confirm('⚠️ WARNING: This will generate a new endpoint URL. You must update your Gumroad webhook settings with the new URL immediately, or incoming webhooks will stop working.\n\nAre you sure you want to continue?');">
+                            <?php wp_nonce_field('gumroad_refresh_hash'); ?>
+                            <button type="submit" name="refresh_endpoint_hash" class="button button-danger">
+                                🔄 Refresh Endpoint Hash
+                            </button>
+                        </form>
+                        
+                        <div class="refresh-hash-warning">
+                            <p><strong>⚠️ WARNING:</strong> Refreshing the hash will change your endpoint URL. After refreshing:</p>
+                            <ul>
+                                <li>Your old endpoint URL will <strong>immediately stop working</strong></li>
+                                <li>You <strong>must update</strong> your Gumroad webhook settings with the new URL</li>
+                                <li>Any webhooks sent to the old URL will be rejected</li>
+                            </ul>
+                            <p><strong>Only use this if your endpoint URL has been compromised or exposed publicly.</strong></p>
+                        </div>
                     </div>
                     
                     <div class="endpoint-instructions">
@@ -1390,6 +1419,58 @@ class Gumroad_Connect {
         .security-notice p {
             margin: 0;
             color: #2c662d;
+        }
+        
+        /* Refresh Hash Section */
+        .refresh-hash-section {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e5e5;
+        }
+        
+        .refresh-hash-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        
+        .button-danger {
+            background: #dc3232 !important;
+            border-color: #dc3232 !important;
+            color: white !important;
+            text-shadow: none !important;
+            font-weight: 600;
+        }
+        
+        .button-danger:hover {
+            background: #a00 !important;
+            border-color: #a00 !important;
+        }
+        
+        .refresh-hash-warning {
+            background: #fef7f7;
+            border-left: 4px solid #dc3232;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 4px;
+        }
+        
+        .refresh-hash-warning p {
+            margin: 10px 0;
+            color: #8a2424;
+        }
+        
+        .refresh-hash-warning strong {
+            color: #dc3232;
+        }
+        
+        .refresh-hash-warning ul {
+            margin: 10px 0;
+            padding-left: 20px;
+            color: #8a2424;
+        }
+        
+        .refresh-hash-warning li {
+            margin: 5px 0;
         }
         ';
     }
