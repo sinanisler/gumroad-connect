@@ -514,6 +514,27 @@ class Gumroad_Connect {
      * Settings page
      */
     public function settings_page() {
+        // Handle product deletion
+        if (isset($_POST['delete_product']) && isset($_POST['product_id']) && check_admin_referer('gumroad_delete_product')) {
+            $product_id = sanitize_text_field($_POST['product_id']);
+            $products = get_option($this->products_option, array());
+            
+            if (isset($products[$product_id])) {
+                $product_name = $products[$product_id]['name'];
+                unset($products[$product_id]);
+                update_option($this->products_option, $products);
+                
+                // Also remove product roles configuration if exists
+                $settings = get_option($this->option_name, array());
+                if (isset($settings['product_roles'][$product_id])) {
+                    unset($settings['product_roles'][$product_id]);
+                    update_option($this->option_name, $settings);
+                }
+                
+                echo '<div class="notice notice-success"><p><strong>✅ Product deleted successfully!</strong> "' . esc_html($product_name) . '" has been removed.</p></div>';
+            }
+        }
+        
         // Handle hash refresh action
         if (isset($_POST['refresh_endpoint_hash']) && check_admin_referer('gumroad_refresh_hash')) {
             $this->generate_endpoint_hash();
@@ -650,6 +671,13 @@ class Gumroad_Connect {
                                                                 <span class="badge badge-configured">✓ Configured</span>
                                                             <?php endif; ?>
                                                         </div>
+                                                        <form method="post" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this product?\n\nProduct: <?php echo esc_js($product_info['name']); ?>\nID: <?php echo esc_js($product_id); ?>\n\nThis will remove the product and its role configuration.');">
+                                                            <?php wp_nonce_field('gumroad_delete_product'); ?>
+                                                            <input type="hidden" name="product_id" value="<?php echo esc_attr($product_id); ?>" />
+                                                            <button type="submit" name="delete_product" class="button-delete-product" title="Delete this product">
+                                                                🗑️ Delete
+                                                            </button>
+                                                        </form>
                                                     </div>
                                                     
                                                     <div class="product-role-content">
@@ -1875,9 +1903,31 @@ class Gumroad_Connect {
         .role-checkbox-label input[type="checkbox"]:checked + strong {
             color: #2271b1;
         }
+        
+        /* Delete Product Button */
+        .button-delete-product {
+            background: #dc3232;
+            color: white;
+            border: 1px solid #dc3232;
+            padding: 4px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        
+        .button-delete-product:hover {
+            background: #a00;
+            border-color: #a00;
+            color: white;
+        }
         ';
     }
 }
+
+// Initialize the plugin
+new Gumroad_Connect();
 
 // Initialize the plugin
 new Gumroad_Connect();
