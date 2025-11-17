@@ -44,17 +44,9 @@ class Gumroad_Connect {
     }
     
     /**
-     * Activate plugin - Create custom role and generate endpoint hash
+     * Activate plugin - Generate endpoint hash
      */
     public function activate_plugin() {
-        // Get subscriber capabilities
-        $subscriber = get_role('subscriber');
-        
-        if ($subscriber && !get_role('paidmember')) {
-            // Add custom "paidmember" role with subscriber capabilities
-            add_role('paidmember', 'Paid Member', $subscriber->capabilities);
-        }
-        
         // Generate unique endpoint hash if not exists
         if (!get_option('gumroad_connect_endpoint_hash')) {
             $this->generate_endpoint_hash();
@@ -300,7 +292,7 @@ class Gumroad_Connect {
         if (!empty($short_product_id) && isset($product_roles[$short_product_id]) && !empty($product_roles[$short_product_id])) {
             $user_roles = $product_roles[$short_product_id];
         } else {
-            $user_roles = isset($settings['user_roles']) ? $settings['user_roles'] : array('paidmember', 'subscriber');
+            $user_roles = isset($settings['user_roles']) ? $settings['user_roles'] : array('subscriber');
         }
         
         $result = array(
@@ -588,15 +580,12 @@ class Gumroad_Connect {
                                                     <?php checked(in_array($role_key, $user_roles)); ?>
                                                 />
                                                 <strong><?php echo esc_html($role_name); ?></strong>
-                                                <?php if ($role_key === 'paidmember'): ?>
-                                                    <span class="badge badge-custom">Custom Role</span>
-                                                <?php endif; ?>
                                             </label>
                                         <?php endforeach; ?>
                                     </fieldset>
                                     <p class="description">
                                         Select which role(s) to assign to newly created users. You can select multiple roles.<br>
-                                        <strong>Recommended:</strong> "Paid Member" (custom) + "Subscriber" (default)
+                                        Use role management plugins to create custom roles if needed.
                                     </p>
                                 </td>
                             </tr>
@@ -644,9 +633,6 @@ class Gumroad_Connect {
                                                                         <?php checked(in_array($role_key, $assigned_roles)); ?>
                                                                     />
                                                                     <strong><?php echo esc_html($role_name); ?></strong>
-                                                                    <?php if ($role_key === 'paidmember'): ?>
-                                                                        <span class="badge badge-custom">Custom</span>
-                                                                    <?php endif; ?>
                                                                 </label>
                                                             <?php endforeach; ?>
                                                         </div>
