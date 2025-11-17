@@ -142,8 +142,11 @@ class Gumroad_Connect {
             $sanitized['create_users'] = (bool) $input['create_users'];
         }
         
+        // Always set user_roles, even if empty (to allow unchecking all roles)
         if (isset($input['user_roles']) && is_array($input['user_roles'])) {
             $sanitized['user_roles'] = array_map('sanitize_text_field', $input['user_roles']);
+        } else {
+            $sanitized['user_roles'] = array(); // Empty array if no roles selected
         }
         
         if (isset($input['email_subject'])) {
@@ -154,6 +157,7 @@ class Gumroad_Connect {
             $sanitized['email_message'] = wp_kses_post($input['email_message']);
         }
         
+        // Always set product_roles, even if empty
         if (isset($input['product_roles']) && is_array($input['product_roles'])) {
             $sanitized['product_roles'] = array();
             foreach ($input['product_roles'] as $product_id => $roles) {
@@ -161,6 +165,8 @@ class Gumroad_Connect {
                     $sanitized['product_roles'][sanitize_text_field($product_id)] = array_map('sanitize_text_field', $roles);
                 }
             }
+        } else {
+            $sanitized['product_roles'] = array(); // Empty array if no product roles configured
         }
         
         return $sanitized;
