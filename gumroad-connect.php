@@ -162,8 +162,13 @@ class Gumroad_Connect {
             $sanitized['email_message'] = wp_kses_post($input['email_message']);
         }
         
-        if (isset($input['selected_products']) && is_array($input['selected_products'])) {
-            $sanitized['selected_products'] = array_map('sanitize_text_field', $input['selected_products']);
+        if (isset($input['product_roles']) && is_array($input['product_roles'])) {
+            $sanitized['product_roles'] = array();
+            foreach ($input['product_roles'] as $product_id => $roles) {
+                if (is_array($roles)) {
+                    $sanitized['product_roles'][sanitize_text_field($product_id)] = array_map('sanitize_text_field', $roles);
+                }
+            }
         }
         
         return $sanitized;
@@ -224,18 +229,18 @@ class Gumroad_Connect {
         // Process user creation if enabled and verified
         $user_creation_result = null;
         if ($create_users && $seller_id_match && isset($params['email'])) {
-            // Check if product selection is enabled and if this product is selected
-            $selected_products = isset($settings['selected_products']) ? $settings['selected_products'] : array();
+            // Check if product-specific roles are configured
+            $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
             $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
             
-            // If no products are selected, create users for all purchases (backward compatibility)
-            // If products are selected, only create users for selected products
-            if (empty($selected_products) || in_array($short_product_id, $selected_products)) {
+            // If no product roles configured, use default roles from settings (backward compatibility)
+            // If product roles exist, only create users for configured products
+            if (empty($product_roles) || isset($product_roles[$short_product_id])) {
                 $user_creation_result = $this->create_or_update_user($params);
             } else {
                 $user_creation_result = array(
                     'status' => 'skipped',
-                    'message' => 'Product not selected for user creation',
+                    'message' => 'Product not configured for user creation',
                     'product_id' => $short_product_id,
                 );
             }
@@ -286,7 +291,17 @@ class Gumroad_Connect {
         $user = get_user_by('email', $email);
         
         $settings = get_option($this->option_name, array());
-        $user_roles = isset($settings['user_roles']) ? $settings['user_roles'] : array('paidmember', 'subscriber');
+        $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+        
+        // Check if product-specific roles are configured
+        $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
+        
+        // Use product-specific roles if configured, otherwise fall back to default user_roles setting
+        if (!empty($short_product_id) && isset($product_roles[$short_product_id]) && !empty($product_roles[$short_product_id])) {
+            $user_roles = $product_roles[$short_product_id];
+        } else {
+            $user_roles = isset($settings['user_roles']) ? $settings['user_roles'] : array('paidmember', 'subscriber');
+        }
         
         $result = array(
             'status' => 'error',
@@ -488,7 +503,7 @@ class Gumroad_Connect {
         $user_roles = isset($settings['user_roles']) ? $settings['user_roles'] : array('paidmember', 'subscriber');
         $email_subject = isset($settings['email_subject']) ? $settings['email_subject'] : 'Welcome! Your Account Has Been Created';
         $email_message = isset($settings['email_message']) ? $settings['email_message'] : '';
-        $selected_products = isset($settings['selected_products']) ? $settings['selected_products'] : array();
+        $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
         
         // Get the REST endpoint URL with unique hash
         $endpoint_hash = $this->get_endpoint_hash();
@@ -588,7 +603,7 @@ class Gumroad_Connect {
                             
                             <tr>
                                 <th scope="row">
-                                    <label>Select Products for User Creation</label>
+                                    <label>Product-Specific Role Assignment</label>
                                 </th>
                                 <td>
                                     <?php if (empty($stored_products)): ?>
@@ -596,25 +611,58 @@ class Gumroad_Connect {
                                             ⚠️ No products detected yet. Make a test purchase or wait for a real sale to see your products here.
                                         </p>
                                     <?php else: ?>
-                                        <fieldset>
-                                            <p class="description" style="margin-bottom: 10px;">
-                                                Select which products should trigger user creation. Leave all unchecked to create users for <strong>all purchases</strong> (default behavior).
+                                        <div class="product-roles-repeater">
+                                            <p class="description" style="margin-bottom: 15px;">
+                                                Configure which roles should be assigned for each product purchase. If no roles are selected for a product, the default "Assign User Roles" setting above will be used.
                                             </p>
+                                            
                                             <?php foreach ($stored_products as $product_id => $product_info): ?>
-                                                <label style="display: block; margin-bottom: 8px; padding: 8px; background: #f6f7f7; border-radius: 4px;">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        name="<?php echo esc_attr($this->option_name); ?>[selected_products][]" 
-                                                        value="<?php echo esc_attr($product_id); ?>"
-                                                        <?php checked(in_array($product_id, $selected_products)); ?>
-                                                    />
-                                                    <strong><?php echo esc_html($product_info['name']); ?></strong>
-                                                    <code style="margin-left: 10px; color: #666;"><?php echo esc_html($product_id); ?></code>
-                                                </label>
+                                                <?php 
+                                                $assigned_roles = isset($product_roles[$product_id]) ? $product_roles[$product_id] : array();
+                                                $has_roles = !empty($assigned_roles);
+                                                ?>
+                                                <div class="product-role-item <?php echo $has_roles ? 'active' : ''; ?>">
+                                                    <div class="product-role-header">
+                                                        <div class="product-info">
+                                                            <strong><?php echo esc_html($product_info['name']); ?></strong>
+                                                            <code style="margin-left: 10px; color: #666;"><?php echo esc_html($product_id); ?></code>
+                                                            <?php if ($has_roles): ?>
+                                                                <span class="badge badge-configured">✓ Configured</span>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div class="product-role-content">
+                                                        <p class="role-section-label">Select roles to assign for this product:</p>
+                                                        <div class="role-checkboxes">
+                                                            <?php foreach ($available_roles as $role_key => $role_name): ?>
+                                                                <label class="role-checkbox-label">
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        name="<?php echo esc_attr($this->option_name); ?>[product_roles][<?php echo esc_attr($product_id); ?>][]" 
+                                                                        value="<?php echo esc_attr($role_key); ?>"
+                                                                        <?php checked(in_array($role_key, $assigned_roles)); ?>
+                                                                    />
+                                                                    <strong><?php echo esc_html($role_name); ?></strong>
+                                                                    <?php if ($role_key === 'paidmember'): ?>
+                                                                        <span class="badge badge-custom">Custom</span>
+                                                                    <?php endif; ?>
+                                                                </label>
+                                                            <?php endforeach; ?>
+                                                        </div>
+                                                        <p class="description" style="margin-top: 8px;">
+                                                            💡 Leave all unchecked to use the default "Assign User Roles" setting above.
+                                                        </p>
+                                                    </div>
+                                                </div>
                                             <?php endforeach; ?>
-                                        </fieldset>
-                                        <p class="description" style="margin-top: 10px;">
-                                            💡 <strong>Tip:</strong> This allows you to have multiple products on Gumroad but only create WordPress users for specific products.
+                                        </div>
+                                        
+                                        <p class="description" style="margin-top: 15px;">
+                                            <strong>💡 How it works:</strong><br>
+                                            • Configure specific roles for each product, or leave unchecked to use default roles<br>
+                                            • Only products with assigned roles will trigger user creation<br>
+                                            • If NO products have roles assigned, ALL purchases will create users with default roles (backward compatible)
                                         </p>
                                     <?php endif; ?>
                                 </td>
@@ -1474,6 +1522,98 @@ class Gumroad_Connect {
         
         .refresh-hash-warning li {
             margin: 5px 0;
+        }
+        
+        /* Product Roles Repeater Styles */
+        .product-roles-repeater {
+            background: #f6f7f7;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #c3c4c7;
+        }
+        
+        .product-role-item {
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .product-role-item.active {
+            border-color: #2271b1;
+            box-shadow: 0 0 0 1px #2271b1;
+        }
+        
+        .product-role-header {
+            padding: 12px 15px;
+            background: #f9f9f9;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .product-role-item.active .product-role-header {
+            background: #e7f5fe;
+            border-bottom-color: #2271b1;
+        }
+        
+        .product-info {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .badge-configured {
+            background: #46b450;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .product-role-content {
+            padding: 15px;
+        }
+        
+        .role-section-label {
+            margin: 0 0 10px 0;
+            font-weight: 600;
+            color: #1d2327;
+        }
+        
+        .role-checkboxes {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 8px;
+        }
+        
+        .role-checkbox-label {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            background: #f6f7f7;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .role-checkbox-label:hover {
+            background: #e7f5fe;
+            border-color: #2271b1;
+        }
+        
+        .role-checkbox-label input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        
+        .role-checkbox-label input[type="checkbox"]:checked + strong {
+            color: #2271b1;
         }
         ';
     }
