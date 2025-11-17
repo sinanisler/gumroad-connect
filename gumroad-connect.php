@@ -1929,5 +1929,3 @@ class Gumroad_Connect {
 // Initialize the plugin
 new Gumroad_Connect();
 
-// Initialize the plugin
-new Gumroad_Connect();
