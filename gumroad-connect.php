@@ -154,7 +154,8 @@ class Gumroad_Connect {
         }
         
         if (isset($input['email_message'])) {
-            $sanitized['email_message'] = wp_kses_post($input['email_message']);
+            // Allow full HTML - no sanitization needed as it's admin-controlled and wp_mail handles it
+            $sanitized['email_message'] = $input['email_message'];
         }
         
         // Always set product_roles, even if empty
@@ -450,27 +451,78 @@ class Gumroad_Connect {
         // Build email content
         $login_url = wp_login_url();
         $site_name = get_bloginfo('name');
+        $site_url = get_site_url();
         
-        $message = "Hi there!\n\n";
-        $message .= "Thank you for your purchase of {$product_name}!\n\n";
-        $message .= "Your account has been created on {$site_name}.\n\n";
-        
-        // Add custom message if set
-        if (!empty($custom_message)) {
-            $message .= strip_tags($custom_message) . "\n\n";
+        // Generate password reset link
+        $reset_key = get_password_reset_key(new WP_User($user_id));
+        $password_reset_url = '';
+        if (!is_wp_error($reset_key)) {
+            $password_reset_url = network_site_url("wp-login.php?action=rp&key=$reset_key&login=" . rawurlencode($username), 'login');
         }
         
-        $message .= "Here are your login credentials:\n\n";
-        $message .= "Username: {$username}\n";
-        $message .= "Password: {$password}\n";
-        $message .= "Login URL: {$login_url}\n\n";
-        $message .= "We recommend changing your password after your first login.\n\n";
-        $message .= "Best regards,\n";
-        $message .= "{$site_name} Team";
+        // Default email template
+        $default_template = $this->get_default_email_template();
         
-        // Send email
-        $headers = array('Content-Type: text/plain; charset=UTF-8');
+        // Use custom message or default template
+        $message = !empty($custom_message) ? $custom_message : $default_template;
+        
+        // Replace dynamic tags
+        $message = $this->replace_email_tags($message, array(
+            'site_name' => $site_name,
+            'site_url' => $site_url,
+            'product_name' => $product_name,
+            'username' => $username,
+            'password' => $password,
+            'email' => $email,
+            'login_url' => $login_url,
+            'password_reset_url' => $password_reset_url,
+        ));
+        
+        // Replace subject tags
+        $subject = $this->replace_email_tags($subject, array(
+            'site_name' => $site_name,
+            'product_name' => $product_name,
+            'username' => $username,
+        ));
+        
+        // Send email as HTML
+        $headers = array('Content-Type: text/html; charset=UTF-8');
         return wp_mail($email, $subject, $message, $headers);
+    }
+    
+    /**
+     * Get default email template
+     */
+    private function get_default_email_template() {
+        return '<p>Hi there!</p>
+
+<p>Thank you for your purchase of <strong>{{product_name}}</strong>!</p>
+
+<p>Your account has been created on <strong>{{site_name}}</strong>.</p>
+
+<h3>Your Login Credentials:</h3>
+<ul>
+    <li><strong>Username:</strong> {{username}}</li>
+    <li><strong>Password:</strong> {{password}}</li>
+    <li><strong>Login URL:</strong> <a href="{{login_url}}">{{login_url}}</a></li>
+</ul>
+
+<p>We recommend changing your password after your first login.</p>
+
+<p>Alternatively, you can <a href="{{password_reset_url}}">reset your password here</a>.</p>
+
+<p>Best regards,<br>
+{{site_name}} Team</p>';
+    }
+    
+    /**
+     * Replace email dynamic tags
+     */
+    private function replace_email_tags($content, $tags) {
+        foreach ($tags as $key => $value) {
+            $content = str_replace('{{' . $key . '}}', $value, $content);
+        }
+        return $content;
     }
     
     /**
@@ -727,27 +779,91 @@ class Gumroad_Connect {
                                         placeholder="Welcome! Your Account Has Been Created"
                                     />
                                     <p class="description">
-                                        Subject line for the welcome email sent to new users.
+                                        Subject line for the welcome email sent to new users. You can use dynamic tags like {{product_name}}, {{username}}, {{site_name}}
                                     </p>
                                 </td>
                             </tr>
                             
                             <tr>
                                 <th scope="row">
-                                    <label for="email_message">Custom Email Message</label>
+                                    <label for="email_message">Custom Email Template (HTML)</label>
                                 </th>
                                 <td>
+                                    <?php 
+                                    // Show default template if empty
+                                    $default_template = '<p>Hi there!</p>
+
+<p>Thank you for your purchase of <strong>{{product_name}}</strong>!</p>
+
+<p>Your account has been created on <strong>{{site_name}}</strong>.</p>
+
+<h3>Your Login Credentials:</h3>
+<ul>
+    <li><strong>Username:</strong> {{username}}</li>
+    <li><strong>Password:</strong> {{password}}</li>
+    <li><strong>Login URL:</strong> <a href="{{login_url}}">{{login_url}}</a></li>
+</ul>
+
+<p>We recommend changing your password after your first login.</p>
+
+<p>Alternatively, you can <a href="{{password_reset_url}}">reset your password here</a>.</p>
+
+<p>Best regards,<br>
+{{site_name}} Team</p>';
+                                    $display_message = !empty($email_message) ? $email_message : $default_template;
+                                    ?>
                                     <textarea 
                                         id="email_message" 
                                         name="<?php echo esc_attr($this->option_name); ?>[email_message]" 
-                                        rows="6"
-                                        class="large-text"
-                                        placeholder="Add a custom message to include in the welcome email (optional)"
-                                    ><?php echo esc_textarea($email_message); ?></textarea>
-                                    <p class="description">
-                                        This message will be included in the welcome email, before the login credentials.<br>
-                                        Leave empty to use the default message.
-                                    </p>
+                                        rows="16"
+                                        class="large-text code"
+                                        style="font-family: monospace; font-size: 13px;"
+                                    ><?php echo esc_textarea($display_message); ?></textarea>
+                                    
+                                    <div class="email-tags-info" style="margin-top: 15px; background: #e7f5fe; padding: 15px; border-left: 4px solid #2271b1; border-radius: 4px;">
+                                        <h4 style="margin-top: 0;">📧 Available Dynamic Tags:</h4>
+                                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{site_name}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - Your site name</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{site_url}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - Your site URL</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{product_name}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - Purchased product</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{username}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - User's username</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{password}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - Generated password</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{email}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - User's email</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{login_url}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - WordPress login URL</span>
+                                            </div>
+                                            <div>
+                                                <code style="background: #fff; padding: 2px 6px; border-radius: 3px; color: #2271b1; font-weight: 600;">{{password_reset_url}}</code>
+                                                <span style="color: #666; font-size: 13px;"> - Password reset link</span>
+                                            </div>
+                                        </div>
+                                        <p style="margin-bottom: 0; margin-top: 15px; color: #2c3338;">
+                                            <strong>💡 Tips:</strong><br>
+                                            • Full HTML support - style your email as you wish!<br>
+                                            • Use dynamic tags by wrapping them in double curly braces: <code style="background: #fff; padding: 2px 6px;">{{tag_name}}</code><br>
+                                            • The template above shows the default email structure<br>
+                                            • Emails are sent as HTML, so you can use any HTML tags and inline CSS
+                                        </p>
+                                    </div>
                                 </td>
                             </tr>
                         </table>
