@@ -713,10 +713,12 @@ class Gumroad_Connect {
                 
                 <!-- Endpoint Card -->
                 <div class="gumroad-card gumroad-endpoint-card">
-                    <h2>🔗 Webhook Endpoint</h2>
-                    <p>Copy this URL and paste it into your <strong>Gumroad Account Settings</strong> under the "Ping" section:</p>
-                    
-                    <div class="endpoint-url-container">
+                    <details>
+                        <summary><h2 style="display: inline; cursor: pointer;">🔗 Webhook Endpoint</h2></summary>
+                        <div class="endpoint-content">
+                            <p>Copy this URL and paste it into your <strong>Gumroad Account Settings</strong> under the "Ping" section:</p>
+                            
+                            <div class="endpoint-url-container">
                         <input 
                             type="text" 
                             id="endpoint-url" 
@@ -768,20 +770,26 @@ class Gumroad_Connect {
                             <li>Test the connection using the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-test'); ?>">Ping Test</a> page</li>
                         </ol>
                     </div>
+                        </div>
+                    </details>
                 </div>
                 
                 <!-- Info Card -->
                 <div class="gumroad-card gumroad-info-card">
-                    <h3>ℹ️ How It Works</h3>
-                    <ul>
-                        <li>When a customer purchases your product on Gumroad, a webhook is sent to your site</li>
-                        <li>The plugin verifies the seller_id for security</li>
-                        <li>If user creation is enabled, a new WordPress account is created with the customer's email</li>
-                        <li>The user is assigned the roles you selected (e.g., "Paid Member" + "Subscriber")</li>
-                        <li>An email is automatically sent with their login credentials</li>
-                        <li>If the user already exists, the roles are simply added to their account</li>
-                        <li>All actions are logged in the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-users'); ?>">User Log</a></li>
-                    </ul>
+                    <details>
+                        <summary><h3 style="display: inline; cursor: pointer;">ℹ️ How It Works</h3></summary>
+                        <div class="info-content">
+                            <ul>
+                                <li>When a customer purchases your product on Gumroad, a webhook is sent to your site</li>
+                                <li>The plugin verifies the seller_id for security</li>
+                                <li>If user creation is enabled, a new WordPress account is created with the customer's email</li>
+                                <li>The user is assigned the roles you selected (e.g., "Paid Member" + "Subscriber")</li>
+                                <li>An email is automatically sent with their login credentials</li>
+                                <li>If the user already exists, the roles are simply added to their account</li>
+                                <li>All actions are logged in the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-users'); ?>">User Log</a></li>
+                            </ul>
+                        </div>
+                    </details>
                 </div>
                 
             </div>
@@ -1299,6 +1307,36 @@ class Gumroad_Connect {
         
         .ping-details summary:hover {
             background: #dcdcde;
+        }
+        
+        .endpoint-content,
+        .info-content {
+            margin-top: 15px;
+        }
+        
+        details summary h2,
+        details summary h3 {
+            display: inline;
+            margin: 0;
+        }
+        
+        details summary {
+            cursor: pointer;
+            list-style: none;
+        }
+        
+        details summary::-webkit-details-marker {
+            display: none;
+        }
+        
+        details summary::before {
+            content: "▶ ";
+            display: inline-block;
+            transition: transform 0.2s;
+        }
+        
+        details[open] summary::before {
+            transform: rotate(90deg);
         }
         
         .quick-info {
