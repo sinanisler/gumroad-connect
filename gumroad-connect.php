@@ -724,105 +724,6 @@ class Gumroad_Connect {
                             </tr>
                         </table>
                         
-                        <h3 style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">📊 Log Settings</h3>
-                        <p>Configure how many log entries to store and display per page. Older entries are automatically deleted when limits are reached.</p>
-                        
-                        <table class="form-table">
-                            <tr>
-                                <th scope="row">
-                                    <label for="ping_log_limit">Ping Log Storage Limit</label>
-                                </th>
-                                <td>
-                                    <?php 
-                                    $ping_log_limit = isset($settings['ping_log_limit']) ? $settings['ping_log_limit'] : 100;
-                                    ?>
-                                    <input 
-                                        type="number" 
-                                        id="ping_log_limit" 
-                                        name="<?php echo esc_attr($this->option_name); ?>[ping_log_limit]" 
-                                        value="<?php echo esc_attr($ping_log_limit); ?>"
-                                        min="10"
-                                        max="1000"
-                                        class="small-text"
-                                    />
-                                    <p class="description">
-                                        Maximum number of ping entries to store in database. Default: 100. Range: 10-1000.<br>
-                                        Older entries are automatically deleted when this limit is exceeded.
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <tr>
-                                <th scope="row">
-                                    <label for="user_log_limit">User Log Storage Limit</label>
-                                </th>
-                                <td>
-                                    <?php 
-                                    $user_log_limit = isset($settings['user_log_limit']) ? $settings['user_log_limit'] : 100;
-                                    ?>
-                                    <input 
-                                        type="number" 
-                                        id="user_log_limit" 
-                                        name="<?php echo esc_attr($this->option_name); ?>[user_log_limit]" 
-                                        value="<?php echo esc_attr($user_log_limit); ?>"
-                                        min="10"
-                                        max="1000"
-                                        class="small-text"
-                                    />
-                                    <p class="description">
-                                        Maximum number of user action entries to store in database. Default: 100. Range: 10-1000.<br>
-                                        Older entries are automatically deleted when this limit is exceeded.
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <tr>
-                                <th scope="row">
-                                    <label for="ping_per_page">Ping Logs Per Page</label>
-                                </th>
-                                <td>
-                                    <?php 
-                                    $ping_per_page = isset($settings['ping_per_page']) ? $settings['ping_per_page'] : 50;
-                                    ?>
-                                    <input 
-                                        type="number" 
-                                        id="ping_per_page" 
-                                        name="<?php echo esc_attr($this->option_name); ?>[ping_per_page]" 
-                                        value="<?php echo esc_attr($ping_per_page); ?>"
-                                        min="10"
-                                        max="200"
-                                        class="small-text"
-                                    />
-                                    <p class="description">
-                                        Number of ping entries to display per page. Default: 50. Range: 10-200.
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <tr>
-                                <th scope="row">
-                                    <label for="user_per_page">User Logs Per Page</label>
-                                </th>
-                                <td>
-                                    <?php 
-                                    $user_per_page = isset($settings['user_per_page']) ? $settings['user_per_page'] : 50;
-                                    ?>
-                                    <input 
-                                        type="number" 
-                                        id="user_per_page" 
-                                        name="<?php echo esc_attr($this->option_name); ?>[user_per_page]" 
-                                        value="<?php echo esc_attr($user_per_page); ?>"
-                                        min="10"
-                                        max="200"
-                                        class="small-text"
-                                    />
-                                    <p class="description">
-                                        Number of user action entries to display per page. Default: 50. Range: 10-200.
-                                    </p>
-                                </td>
-                            </tr>
-                        </table>
-                        
                         <?php submit_button('Save Settings'); ?>
                     </form>
                 </div>
@@ -936,6 +837,24 @@ class Gumroad_Connect {
      * Test page
      */
     public function test_page() {
+        // Handle settings update
+        if (isset($_POST['update_ping_settings']) && check_admin_referer('gumroad_ping_settings')) {
+            $settings = get_option($this->option_name, array());
+            
+            if (isset($_POST[$this->option_name]['ping_log_limit'])) {
+                $ping_log_limit = intval($_POST[$this->option_name]['ping_log_limit']);
+                $settings['ping_log_limit'] = max(10, min(1000, $ping_log_limit));
+            }
+            
+            if (isset($_POST[$this->option_name]['ping_per_page'])) {
+                $ping_per_page = intval($_POST[$this->option_name]['ping_per_page']);
+                $settings['ping_per_page'] = max(10, min(200, $ping_per_page));
+            }
+            
+            update_option($this->option_name, $settings);
+            echo '<div class="notice notice-success"><p>Ping log settings saved successfully!</p></div>';
+        }
+        
         // Handle clear log action
         if (isset($_POST['clear_log']) && check_admin_referer('gumroad_clear_log')) {
             delete_option($this->ping_log_option);
@@ -962,6 +881,65 @@ class Gumroad_Connect {
             <h1>🧪 Gumroad Connect - Ping Test</h1>
             
             <div class="gumroad-connect-container">
+                
+                <!-- Ping Log Settings -->
+                <div class="gumroad-card">
+                    <h2>⚙️ Ping Log Settings</h2>
+                    <form method="post" action="">
+                        <?php wp_nonce_field('gumroad_ping_settings'); ?>
+                        
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="ping_log_limit">Storage Limit</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $ping_log_limit = isset($settings['ping_log_limit']) ? $settings['ping_log_limit'] : 100;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="ping_log_limit" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[ping_log_limit]" 
+                                        value="<?php echo esc_attr($ping_log_limit); ?>"
+                                        min="10"
+                                        max="1000"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Maximum number of ping entries to store in database. Default: 100. Range: 10-1000.<br>
+                                        Older entries are automatically deleted when this limit is exceeded.
+                                    </p>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label for="ping_per_page">Entries Per Page</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $ping_per_page = isset($settings['ping_per_page']) ? $settings['ping_per_page'] : 50;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="ping_per_page" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[ping_per_page]" 
+                                        value="<?php echo esc_attr($ping_per_page); ?>"
+                                        min="10"
+                                        max="200"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Number of ping entries to display per page. Default: 50. Range: 10-200.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <button type="submit" name="update_ping_settings" class="button button-primary">Save Settings</button>
+                    </form>
+                </div>
                 
                 <!-- Test Instructions -->
                 <div class="gumroad-card">
@@ -1106,6 +1084,24 @@ class Gumroad_Connect {
      * User log page
      */
     public function user_log_page() {
+        // Handle settings update
+        if (isset($_POST['update_user_settings']) && check_admin_referer('gumroad_user_settings')) {
+            $settings = get_option($this->option_name, array());
+            
+            if (isset($_POST[$this->option_name]['user_log_limit'])) {
+                $user_log_limit = intval($_POST[$this->option_name]['user_log_limit']);
+                $settings['user_log_limit'] = max(10, min(1000, $user_log_limit));
+            }
+            
+            if (isset($_POST[$this->option_name]['user_per_page'])) {
+                $user_per_page = intval($_POST[$this->option_name]['user_per_page']);
+                $settings['user_per_page'] = max(10, min(200, $user_per_page));
+            }
+            
+            update_option($this->option_name, $settings);
+            echo '<div class="notice notice-success"><p>User log settings saved successfully!</p></div>';
+        }
+        
         // Handle clear log action
         if (isset($_POST['clear_user_log']) && check_admin_referer('gumroad_clear_user_log')) {
             delete_option($this->user_log_option);
@@ -1131,6 +1127,65 @@ class Gumroad_Connect {
             <h1>👥 Gumroad Connect - User Log</h1>
             
             <div class="gumroad-connect-container">
+                
+                <!-- User Log Settings -->
+                <div class="gumroad-card">
+                    <h2>⚙️ User Log Settings</h2>
+                    <form method="post" action="">
+                        <?php wp_nonce_field('gumroad_user_settings'); ?>
+                        
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="user_log_limit">Storage Limit</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $user_log_limit = isset($settings['user_log_limit']) ? $settings['user_log_limit'] : 100;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="user_log_limit" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[user_log_limit]" 
+                                        value="<?php echo esc_attr($user_log_limit); ?>"
+                                        min="10"
+                                        max="1000"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Maximum number of user action entries to store in database. Default: 100. Range: 10-1000.<br>
+                                        Older entries are automatically deleted when this limit is exceeded.
+                                    </p>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label for="user_per_page">Entries Per Page</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $user_per_page = isset($settings['user_per_page']) ? $settings['user_per_page'] : 50;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="user_per_page" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[user_per_page]" 
+                                        value="<?php echo esc_attr($user_per_page); ?>"
+                                        min="10"
+                                        max="200"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Number of user action entries to display per page. Default: 50. Range: 10-200.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <button type="submit" name="update_user_settings" class="button button-primary">Save Settings</button>
+                    </form>
+                </div>
                 
                 <!-- User Log Header -->
                 <div class="gumroad-card">
