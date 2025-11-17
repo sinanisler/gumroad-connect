@@ -1,4 +1,4 @@
-<?php             
+<?php              
 /** 
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
