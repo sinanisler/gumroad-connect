@@ -169,6 +169,28 @@ class Gumroad_Connect {
             $sanitized['product_roles'] = array(); // Empty array if no product roles configured
         }
         
+        // Sanitize log limit settings (storage limits)
+        if (isset($input['ping_log_limit'])) {
+            $ping_log_limit = intval($input['ping_log_limit']);
+            $sanitized['ping_log_limit'] = max(10, min(1000, $ping_log_limit)); // Between 10 and 1000
+        }
+        
+        if (isset($input['user_log_limit'])) {
+            $user_log_limit = intval($input['user_log_limit']);
+            $sanitized['user_log_limit'] = max(10, min(1000, $user_log_limit)); // Between 10 and 1000
+        }
+        
+        // Sanitize per-page display settings
+        if (isset($input['ping_per_page'])) {
+            $ping_per_page = intval($input['ping_per_page']);
+            $sanitized['ping_per_page'] = max(10, min(200, $ping_per_page)); // Between 10 and 200
+        }
+        
+        if (isset($input['user_per_page'])) {
+            $user_per_page = intval($input['user_per_page']);
+            $sanitized['user_per_page'] = max(10, min(200, $user_per_page)); // Between 10 and 200
+        }
+        
         return $sanitized;
     }
     
@@ -213,10 +235,11 @@ class Gumroad_Connect {
             'headers' => $this->get_request_headers($request),
         );
         
-        // Store in ping log (keep last 20 pings)
+        // Store in ping log with dynamic limit (automatic cleanup)
+        $ping_log_limit = isset($settings['ping_log_limit']) ? intval($settings['ping_log_limit']) : 100;
         $ping_log = get_option($this->ping_log_option, array());
         array_unshift($ping_log, $log_entry);
-        $ping_log = array_slice($ping_log, 0, 20);
+        $ping_log = array_slice($ping_log, 0, $ping_log_limit); // Auto-delete oldest entries
         update_option($this->ping_log_option, $ping_log);
         
         // Store product information for selection in settings
@@ -467,10 +490,12 @@ class Gumroad_Connect {
             ),
         );
         
-        // Store in user log (keep last 100 entries)
+        // Store in user log with dynamic limit (automatic cleanup)
+        $settings = get_option($this->option_name, array());
+        $user_log_limit = isset($settings['user_log_limit']) ? intval($settings['user_log_limit']) : 100;
         $user_log = get_option($this->user_log_option, array());
         array_unshift($user_log, $log_entry);
-        $user_log = array_slice($user_log, 0, 100);
+        $user_log = array_slice($user_log, 0, $user_log_limit); // Auto-delete oldest entries
         update_option($this->user_log_option, $user_log);
     }
     
@@ -699,6 +724,105 @@ class Gumroad_Connect {
                             </tr>
                         </table>
                         
+                        <h3 style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">📊 Log Settings</h3>
+                        <p>Configure how many log entries to store and display per page. Older entries are automatically deleted when limits are reached.</p>
+                        
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="ping_log_limit">Ping Log Storage Limit</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $ping_log_limit = isset($settings['ping_log_limit']) ? $settings['ping_log_limit'] : 100;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="ping_log_limit" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[ping_log_limit]" 
+                                        value="<?php echo esc_attr($ping_log_limit); ?>"
+                                        min="10"
+                                        max="1000"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Maximum number of ping entries to store in database. Default: 100. Range: 10-1000.<br>
+                                        Older entries are automatically deleted when this limit is exceeded.
+                                    </p>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label for="user_log_limit">User Log Storage Limit</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $user_log_limit = isset($settings['user_log_limit']) ? $settings['user_log_limit'] : 100;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="user_log_limit" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[user_log_limit]" 
+                                        value="<?php echo esc_attr($user_log_limit); ?>"
+                                        min="10"
+                                        max="1000"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Maximum number of user action entries to store in database. Default: 100. Range: 10-1000.<br>
+                                        Older entries are automatically deleted when this limit is exceeded.
+                                    </p>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label for="ping_per_page">Ping Logs Per Page</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $ping_per_page = isset($settings['ping_per_page']) ? $settings['ping_per_page'] : 50;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="ping_per_page" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[ping_per_page]" 
+                                        value="<?php echo esc_attr($ping_per_page); ?>"
+                                        min="10"
+                                        max="200"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Number of ping entries to display per page. Default: 50. Range: 10-200.
+                                    </p>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label for="user_per_page">User Logs Per Page</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $user_per_page = isset($settings['user_per_page']) ? $settings['user_per_page'] : 50;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="user_per_page" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[user_per_page]" 
+                                        value="<?php echo esc_attr($user_per_page); ?>"
+                                        min="10"
+                                        max="200"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Number of user action entries to display per page. Default: 50. Range: 10-200.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                        
                         <?php submit_button('Save Settings'); ?>
                     </form>
                 </div>
@@ -822,6 +946,17 @@ class Gumroad_Connect {
         $settings = get_option($this->option_name, array());
         $seller_id = isset($settings['seller_id']) ? $settings['seller_id'] : '';
         
+        // Get log limits from settings
+        $ping_log_limit = isset($settings['ping_log_limit']) ? intval($settings['ping_log_limit']) : 100;
+        $ping_per_page = isset($settings['ping_per_page']) ? intval($settings['ping_per_page']) : 50;
+        
+        // Pagination
+        $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+        $total_entries = count($ping_log);
+        $total_pages = ceil($total_entries / $ping_per_page);
+        $offset = ($current_page - 1) * $ping_per_page;
+        $paged_log = array_slice($ping_log, $offset, $ping_per_page);
+        
         ?>
         <div class="wrap gumroad-connect-wrap">
             <h1>🧪 Gumroad Connect - Ping Test</h1>
@@ -866,7 +1001,13 @@ class Gumroad_Connect {
                 
                 <!-- Ping Log -->
                 <div class="gumroad-card">
-                    <h2>📬 Received Pings (Last 20)</h2>
+                    <h2>📬 Received Pings (Storing Last <?php echo $ping_log_limit; ?>)</h2>
+                    
+                    <?php if ($total_entries > 0): ?>
+                        <div class="log-stats">
+                            <p>Showing <?php echo count($paged_log); ?> of <?php echo $total_entries; ?> entries (Page <?php echo $current_page; ?> of <?php echo $total_pages; ?>)</p>
+                        </div>
+                    <?php endif; ?>
                     
                     <?php if (empty($ping_log)): ?>
                         <div class="no-pings">
@@ -874,10 +1015,10 @@ class Gumroad_Connect {
                             <p>Make a test purchase or wait for a real sale to see data here.</p>
                         </div>
                     <?php else: ?>
-                        <?php foreach ($ping_log as $index => $entry): ?>
+                        <?php foreach ($paged_log as $index => $entry): ?>
                             <div class="ping-entry <?php echo $entry['seller_id_match'] ? 'verified' : 'unverified'; ?>">
                                 <div class="ping-header">
-                                    <strong>Ping #<?php echo ($index + 1); ?></strong>
+                                    <strong>Ping #<?php echo ($offset + $index + 1); ?></strong>
                                     <span class="ping-time"><?php echo esc_html($entry['datetime_readable']); ?></span>
                                     <?php if ($entry['seller_id_match']): ?>
                                         <span class="badge badge-success">✅ Verified</span>
@@ -923,6 +1064,36 @@ class Gumroad_Connect {
                                 </div>
                             </div>
                         <?php endforeach; ?>
+                        
+                        <!-- Pagination -->
+                        <?php if ($total_pages > 1): ?>
+                            <div class="tablenav">
+                                <div class="tablenav-pages">
+                                    <span class="displaying-num"><?php echo $total_entries; ?> items</span>
+                                    <span class="pagination-links">
+                                        <?php
+                                        $base_url = admin_url('admin.php?page=gumroad-connect-test');
+                                        
+                                        if ($current_page > 1) {
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=1') . '">« First</a> ';
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . ($current_page - 1)) . '">‹ Previous</a> ';
+                                        }
+                                        
+                                        echo '<span class="paging-input">';
+                                        echo '<span class="tablenav-paging-text">';
+                                        echo $current_page . ' of <span class="total-pages">' . $total_pages . '</span>';
+                                        echo '</span>';
+                                        echo '</span> ';
+                                        
+                                        if ($current_page < $total_pages) {
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . ($current_page + 1)) . '">Next ›</a> ';
+                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . $total_pages) . '">Last »</a>';
+                                        }
+                                        ?>
+                                    </span>
+                                </div>
+                            </div>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </div>
                 
@@ -942,14 +1113,18 @@ class Gumroad_Connect {
         }
         
         $user_log = get_option($this->user_log_option, array());
+        $settings = get_option($this->option_name, array());
+        
+        // Get log limits from settings
+        $user_log_limit = isset($settings['user_log_limit']) ? intval($settings['user_log_limit']) : 100;
+        $user_per_page = isset($settings['user_per_page']) ? intval($settings['user_per_page']) : 50;
         
         // Pagination
-        $per_page = 100;
         $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
         $total_entries = count($user_log);
-        $total_pages = ceil($total_entries / $per_page);
-        $offset = ($current_page - 1) * $per_page;
-        $paged_log = array_slice($user_log, $offset, $per_page);
+        $total_pages = ceil($total_entries / $user_per_page);
+        $offset = ($current_page - 1) * $user_per_page;
+        $paged_log = array_slice($user_log, $offset, $user_per_page);
         
         ?>
         <div class="wrap gumroad-connect-wrap">
@@ -977,7 +1152,7 @@ class Gumroad_Connect {
                 
                 <!-- User Log Entries -->
                 <div class="gumroad-card">
-                    <h2>👤 User Actions (Last 100)</h2>
+                    <h2>👤 User Actions (Storing Last <?php echo $user_log_limit; ?>)</h2>
                     
                     <?php if ($total_entries > 0): ?>
                         <div class="log-stats">
