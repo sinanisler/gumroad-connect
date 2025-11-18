@@ -157,8 +157,8 @@ class Gumroad_Connect {
         }
         
         if (isset($input['email_message'])) {
-            // Allow full HTML - no sanitization needed as it's admin-controlled and wp_mail handles it
-            $sanitized['email_message'] = $input['email_message'];
+            // Allow full HTML - strip slashes to prevent accumulation on each save
+            $sanitized['email_message'] = wp_unslash($input['email_message']);
         }
         
         // Always set product_roles, even if empty
