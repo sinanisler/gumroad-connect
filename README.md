@@ -11,6 +11,10 @@ Connect WordPress with Gumroad webhooks to automatically create user accounts an
 <img width="627" height="357" alt="image" src="https://github.com/user-attachments/assets/eca4cb3b-a9cb-4e4e-92d5-718f7ed54bf9" />
 </a>
 
+Screenshot:
+<img width="1374" height="918" alt="image" src="https://github.com/user-attachments/assets/90b7786b-b6af-4af7-8ff6-b87264e68e7e" />
+
+
 ## Features
 
 ✅ **Automatic User Creation** - Creates WordPress users when customers purchase
