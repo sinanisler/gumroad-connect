@@ -124,7 +124,10 @@ class Gumroad_Connect {
         register_setting(
             'gumroad_connect_settings_group',
             $this->option_name,
-            array($this, 'sanitize_settings')
+            array(
+                'sanitize_callback' => array($this, 'sanitize_settings'),
+                'type' => 'array',
+            )
         );
     }
     
