@@ -681,7 +681,7 @@ class Gumroad_Connect {
      */
     public function settings_page() {
         // Handle settings save
-        if (isset($_POST['save_gumroad_settings']) && check_admin_referer('gumroad_save_settings')) {
+        if (isset($_POST['save_gumroad_settings']) && isset($_POST['gumroad_save_settings_nonce']) && wp_verify_nonce($_POST['gumroad_save_settings_nonce'], 'gumroad_save_settings')) {
             if (isset($_POST[$this->option_name])) {
                 $sanitized = $this->sanitize_settings($_POST[$this->option_name]);
                 update_option($this->option_name, $sanitized);
@@ -690,7 +690,7 @@ class Gumroad_Connect {
         }
         
         // Handle product deletion
-        if (isset($_POST['delete_product']) && isset($_POST['product_id']) && check_admin_referer('gumroad_delete_product')) {
+        if (isset($_POST['delete_product']) && isset($_POST['product_id']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_delete_product')) {
             $product_id = sanitize_text_field($_POST['product_id']);
             $products = get_option($this->products_option, array());
             
@@ -711,7 +711,7 @@ class Gumroad_Connect {
         }
         
         // Handle hash refresh action
-        if (isset($_POST['refresh_endpoint_hash']) && check_admin_referer('gumroad_refresh_hash')) {
+        if (isset($_POST['refresh_endpoint_hash']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_refresh_hash')) {
             $this->generate_endpoint_hash();
             echo '<div class="notice notice-success"><p><strong>✅ Endpoint hash refreshed successfully!</strong> Make sure to update your Gumroad webhook URL with the new endpoint.</p></div>';
         }
@@ -745,7 +745,7 @@ class Gumroad_Connect {
                 <div class="gumroad-card">
                     <h2>⚙️ Configuration</h2>
                     <form method="post" action="">
-                        <?php wp_nonce_field('gumroad_save_settings'); ?>
+                        <?php wp_nonce_field('gumroad_save_settings', 'gumroad_save_settings_nonce'); ?>
                         
                         <table class="form-table">
                             <tr>
@@ -1104,7 +1104,7 @@ class Gumroad_Connect {
      */
     public function test_page() {
         // Handle settings update
-        if (isset($_POST['update_ping_settings']) && check_admin_referer('gumroad_ping_settings')) {
+        if (isset($_POST['update_ping_settings']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_ping_settings')) {
             $settings = get_option($this->option_name, array());
             
             if (isset($_POST[$this->option_name]['ping_log_limit'])) {
@@ -1122,7 +1122,7 @@ class Gumroad_Connect {
         }
         
         // Handle clear log action
-        if (isset($_POST['clear_log']) && check_admin_referer('gumroad_clear_log')) {
+        if (isset($_POST['clear_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_log')) {
             delete_option($this->ping_log_option);
             echo '<div class="notice notice-success"><p>Ping log cleared successfully!</p></div>';
         }
@@ -1351,7 +1351,7 @@ class Gumroad_Connect {
      */
     public function user_log_page() {
         // Handle settings update
-        if (isset($_POST['update_user_settings']) && check_admin_referer('gumroad_user_settings')) {
+        if (isset($_POST['update_user_settings']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_user_settings')) {
             $settings = get_option($this->option_name, array());
             
             if (isset($_POST[$this->option_name]['user_log_limit'])) {
@@ -1369,7 +1369,7 @@ class Gumroad_Connect {
         }
         
         // Handle clear log action
-        if (isset($_POST['clear_user_log']) && check_admin_referer('gumroad_clear_user_log')) {
+        if (isset($_POST['clear_user_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_user_log')) {
             delete_option($this->user_log_option);
             echo '<div class="notice notice-success"><p>User log cleared successfully!</p></div>';
         }
