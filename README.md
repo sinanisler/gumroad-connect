@@ -1,13 +1,9 @@
 # Gumroad Connect
 
 [![Sponsor me](https://img.shields.io/badge/Consider_Supporting_My_Projects_❤-GitHub-d46)](https://github.com/sponsors/sinanisler)
-
-
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sinanisler/gumroad-connect)
 
-
-Connect your WordPress site with Gumroad PING WEBHOOK to automatically create user accounts when customers make a purchase.
-
+Connect WordPress with Gumroad webhooks to automatically create user accounts and manage subscriptions.
 
 ## Tutorial Video
 
@@ -15,60 +11,53 @@ Connect your WordPress site with Gumroad PING WEBHOOK to automatically create us
 <img width="627" height="357" alt="image" src="https://github.com/user-attachments/assets/eca4cb3b-a9cb-4e4e-92d5-718f7ed54bf9" />
 </a>
 
-
-
-
 ## Features
 
-✅ **Automatic User Creation** - Creates WordPress users automatically when customers purchase your Gumroad products
+✅ **Automatic User Creation** - Creates WordPress users when customers purchase
 
-✅ **Custom Role Assignment** - Assigns custom "Paid Member" role plus any additional roles you choose
+✅ **Product-Specific Roles** - Assign different roles for different products
 
-✅ **Email Notifications** - Sends welcome emails with login credentials to new users
+✅ **Subscription Support** - Handles recurring payments and cancellations
 
-✅ **Webhook Integration** - Real-time processing of Gumroad purchases via webhooks
+✅ **Custom Email Templates** - Full HTML support with dynamic tags
 
-✅ **Security Verification** - Validates seller ID to ensure requests are legitimate
+✅ **Secure Endpoints** - Unique hash-based webhook URLs
 
-✅ **Comprehensive Logging** - Tracks all webhook pings and user creation activities with pagination
+✅ **Comprehensive Logging** - Configurable storage limits (10-1000 entries)
 
-✅ **Existing User Handling** - Adds roles to existing users instead of creating duplicates
+✅ **Auto Role Management** - Adds/removes roles based on purchase/cancellation
 
-✅ **Customizable Emails** - Configure welcome email subject and message
-
-✅ **Test Mode Support** - Built-in ping test page to verify your webhook setup
-
-✅ **User Metadata** - Stores Gumroad purchase information (sale ID, product name, purchase date)
+✅ **GitHub Auto-Updates** - Updates directly from repository
 
 ## Installation
 
-1. Upload the plugin folder to `/wp-content/plugins/`
-2. Activate the plugin through the WordPress admin panel
-3. Navigate to **Gumroad Connect** > **Settings**
-4. Enter your Gumroad Seller ID
-5. Copy the webhook URL and add it to your Gumroad account settings
+1. Upload to `/wp-content/plugins/gumroad-connect`
+2. Activate in WordPress admin
+3. Go to **Gumroad Connect** > **Settings**
+4. Enter your Seller ID
+5. Copy webhook URL to Gumroad settings
 
 ## Quick Setup
 
-1. **Get Your Seller ID** - Find it in your Gumroad account settings
-2. **Configure Plugin** - Paste your Seller ID in plugin settings
-3. **Enable User Creation** - Check "Auto Create Users" option
-4. **Select Roles** - Choose which roles to assign (recommended: Paid Member + Subscriber)
-5. **Add Webhook** - Copy the ping endpoint URL to your Gumroad account
-6. **Test Connection** - Use the Ping Test page to verify everything works
+1. Enter Gumroad Seller ID in Settings
+2. Enable "Auto Create Users"
+3. Configure default roles or product-specific roles
+4. Customize email template (optional)
+5. Add webhook URL to Gumroad account
+6. Test using Ping Test page
 
 ## How It Works
 
-1. Customer purchases your product on Gumroad
-2. Gumroad sends webhook notification to your WordPress site
-3. Plugin verifies the seller ID for security
-4. WordPress user account is created with customer's email
-5. Selected roles are assigned to the user
-6. Welcome email with login credentials is sent automatically
-7. Purchase details are logged for your records
+1. Customer purchases on Gumroad
+2. Webhook sent to WordPress
+3. Plugin verifies seller ID
+4. User created/updated with assigned roles
+5. Welcome email sent with credentials
+6. Subscription status tracked for recurring payments
+7. Roles removed on cancellation/refund
 
 ## Admin Pages
 
-- **Settings** - Configure seller ID, user roles, and email templates
-- **Ping Test** - View incoming webhooks and test your connection
-- **User Log** - Monitor all user creation activities (last 100 entries with pagination)
+- **Settings** - Configure seller ID, roles, email templates, and storage limits
+- **Ping Test** - View incoming webhooks and verify connection
+- **User Log** - Monitor user creation and subscription activity
