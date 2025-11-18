@@ -3,7 +3,7 @@
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
  * Description: Connect your WordPress site with Gumroad to automatically create user accounts when customers make a purchase.
- * Version: 1.23
+ * Version: 1.24
  * Author: sinanisler
  * Author URI: https://sinanisler.com
  * License: GPL v2 or later
