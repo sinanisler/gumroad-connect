@@ -680,6 +680,15 @@ class Gumroad_Connect {
      * Settings page
      */
     public function settings_page() {
+        // Handle settings save
+        if (isset($_POST['save_gumroad_settings']) && check_admin_referer('gumroad_save_settings')) {
+            if (isset($_POST[$this->option_name])) {
+                $sanitized = $this->sanitize_settings($_POST[$this->option_name]);
+                update_option($this->option_name, $sanitized);
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Settings saved successfully!</strong></p></div>';
+            }
+        }
+        
         // Handle product deletion
         if (isset($_POST['delete_product']) && isset($_POST['product_id']) && check_admin_referer('gumroad_delete_product')) {
             $product_id = sanitize_text_field($_POST['product_id']);
@@ -735,10 +744,8 @@ class Gumroad_Connect {
                 <!-- Settings Card -->
                 <div class="gumroad-card">
                     <h2>⚙️ Configuration</h2>
-                    <form method="post" action="options.php">
-                        <?php
-                        settings_fields('gumroad_connect_settings_group');
-                        ?>
+                    <form method="post" action="">
+                        <?php wp_nonce_field('gumroad_save_settings'); ?>
                         
                         <table class="form-table">
                             <tr>
@@ -747,12 +754,13 @@ class Gumroad_Connect {
                                 </th>
                                 <td>
                                     <input 
-                                        type="password" 
+                                        type="text" 
                                         id="seller_id" 
                                         name="<?php echo esc_attr($this->option_name); ?>[seller_id]" 
                                         value="<?php echo esc_attr($seller_id); ?>" 
                                         class="regular-text"
                                         placeholder="RcuODgh_........"
+                                        style="width:100px"
                                     />
                                     <p class="description">
                                         Your Gumroad seller ID. This will be verified against incoming pings for security.
@@ -982,7 +990,7 @@ class Gumroad_Connect {
                             </tr>
                         </table>
                         
-                        <?php submit_button('Save Settings'); ?>
+                        <?php submit_button('Save Settings', 'primary', 'save_gumroad_settings'); ?>
                     </form>
                 </div>
                 
