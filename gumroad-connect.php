@@ -248,23 +248,33 @@ class Gumroad_Connect {
             $this->store_product_info($params['short_product_id'], $params['product_name']);
         }
         
-        // Process user creation if enabled and verified
+        // Process user creation/update/cancellation if enabled and verified
         $user_creation_result = null;
         if ($create_users && $seller_id_match && isset($params['email'])) {
-            // Check if product-specific roles are configured
-            $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
-            $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+            // Check if this is a refund or cancellation
+            $is_refunded = isset($params['refunded']) && $params['refunded'] === 'true';
+            $is_recurring = isset($params['is_recurring_charge']) && $params['is_recurring_charge'] === 'true';
+            $has_subscription_id = isset($params['subscription_id']) && !empty($params['subscription_id']);
             
-            // If no product roles configured, use default roles from settings (backward compatibility)
-            // If product roles exist, only create users for configured products
-            if (empty($product_roles) || isset($product_roles[$short_product_id])) {
-                $user_creation_result = $this->create_or_update_user($params);
+            // Handle subscription cancellation or refund
+            if ($is_refunded && $has_subscription_id) {
+                $user_creation_result = $this->handle_subscription_cancellation($params);
             } else {
-                $user_creation_result = array(
-                    'status' => 'skipped',
-                    'message' => 'Product not configured for user creation',
-                    'product_id' => $short_product_id,
-                );
+                // Check if product-specific roles are configured
+                $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
+                $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+                
+                // If no product roles configured, use default roles from settings (backward compatibility)
+                // If product roles exist, only create users for configured products
+                if (empty($product_roles) || isset($product_roles[$short_product_id])) {
+                    $user_creation_result = $this->create_or_update_user($params);
+                } else {
+                    $user_creation_result = array(
+                        'status' => 'skipped',
+                        'message' => 'Product not configured for user creation',
+                        'product_id' => $short_product_id,
+                    );
+                }
             }
         }
         
@@ -276,6 +286,81 @@ class Gumroad_Connect {
             'seller_id_verified' => $seller_id_match,
             'user_created' => $user_creation_result,
         ), 200);
+    }
+    
+    /**
+     * Handle subscription cancellation or refund
+     */
+    private function handle_subscription_cancellation($params) {
+        $email = sanitize_email($params['email']);
+        $subscription_id = isset($params['subscription_id']) ? $params['subscription_id'] : '';
+        $product_name = isset($params['product_name']) ? $params['product_name'] : 'Product';
+        $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+        
+        $result = array(
+            'status' => 'error',
+            'message' => '',
+            'user_id' => 0,
+            'email' => $email,
+            'action' => 'cancellation',
+        );
+        
+        // Find user by email
+        $user = get_user_by('email', $email);
+        
+        if (!$user) {
+            $result['message'] = 'User not found with email: ' . $email;
+            $this->log_user_action($result, $params);
+            return $result;
+        }
+        
+        $user_id = $user->ID;
+        
+        // Verify subscription ID matches
+        $stored_subscription_id = get_user_meta($user_id, 'gumroad_subscription_id', true);
+        if ($stored_subscription_id !== $subscription_id) {
+            $result['message'] = 'Subscription ID mismatch. Stored: ' . $stored_subscription_id . ', Received: ' . $subscription_id;
+            $result['user_id'] = $user_id;
+            $this->log_user_action($result, $params);
+            return $result;
+        }
+        
+        // Get the roles that were assigned for this product
+        $settings = get_option($this->option_name, array());
+        $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
+        
+        // Determine which roles to remove
+        $roles_to_remove = array();
+        if (!empty($short_product_id) && isset($product_roles[$short_product_id]) && !empty($product_roles[$short_product_id])) {
+            $roles_to_remove = $product_roles[$short_product_id];
+        } else {
+            // Fall back to default user_roles setting
+            $roles_to_remove = isset($settings['user_roles']) ? $settings['user_roles'] : array('subscriber');
+        }
+        
+        // Remove roles from user
+        $roles_removed = array();
+        foreach ($roles_to_remove as $role) {
+            if (in_array($role, $user->roles)) {
+                $user->remove_role($role);
+                $roles_removed[] = $role;
+            }
+        }
+        
+        // Update subscription status
+        update_user_meta($user_id, 'gumroad_subscription_status', 'cancelled');
+        update_user_meta($user_id, 'gumroad_subscription_cancelled_date', current_time('mysql'));
+        
+        $result['status'] = 'cancelled';
+        $result['message'] = 'Subscription cancelled. Roles removed: ' . implode(', ', $roles_removed);
+        $result['user_id'] = $user_id;
+        $result['roles_removed'] = $roles_removed;
+        $result['subscription_id'] = $subscription_id;
+        
+        // Log the cancellation
+        $this->log_user_action($result, $params);
+        
+        return $result;
     }
     
     /**
@@ -345,6 +430,19 @@ class Gumroad_Connect {
                 }
             }
             
+            // Update subscription info if this is a subscription
+            $subscription_id = isset($params['subscription_id']) ? $params['subscription_id'] : '';
+            $is_recurring = isset($params['is_recurring_charge']) ? $params['is_recurring_charge'] : 'false';
+            $recurrence = isset($params['recurrence']) ? $params['recurrence'] : '';
+            
+            if (!empty($subscription_id)) {
+                update_user_meta($user_id, 'gumroad_subscription_id', $subscription_id);
+                update_user_meta($user_id, 'gumroad_is_recurring', $is_recurring);
+                update_user_meta($user_id, 'gumroad_recurrence', $recurrence);
+                update_user_meta($user_id, 'gumroad_subscription_status', 'active');
+                update_user_meta($user_id, 'gumroad_last_payment', current_time('mysql'));
+            }
+            
             $result['status'] = 'existing';
             $result['message'] = 'User already exists. Roles updated: ' . implode(', ', $roles_added);
             $result['user_id'] = $user_id;
@@ -388,6 +486,19 @@ class Gumroad_Connect {
                 update_user_meta($user_id, 'gumroad_sale_id', $sale_id);
                 update_user_meta($user_id, 'gumroad_product_name', $product_name);
                 update_user_meta($user_id, 'gumroad_purchase_date', current_time('mysql'));
+                
+                // Store subscription info if this is a subscription
+                $subscription_id = isset($params['subscription_id']) ? $params['subscription_id'] : '';
+                $is_recurring = isset($params['is_recurring_charge']) ? $params['is_recurring_charge'] : 'false';
+                $recurrence = isset($params['recurrence']) ? $params['recurrence'] : '';
+                
+                if (!empty($subscription_id)) {
+                    update_user_meta($user_id, 'gumroad_subscription_id', $subscription_id);
+                    update_user_meta($user_id, 'gumroad_is_recurring', $is_recurring);
+                    update_user_meta($user_id, 'gumroad_recurrence', $recurrence);
+                    update_user_meta($user_id, 'gumroad_subscription_status', 'active');
+                    update_user_meta($user_id, 'gumroad_subscription_start', current_time('mysql'));
+                }
                 
                 // Send welcome email with credentials
                 $email_sent = $this->send_welcome_email($user_id, $email, $username, $password, $product_name);
@@ -1381,6 +1492,10 @@ class Gumroad_Connect {
                                     $status_class = 'status-existing';
                                     $status_icon = '🔄';
                                     break;
+                                case 'cancelled':
+                                    $status_class = 'status-cancelled';
+                                    $status_icon = '🚫';
+                                    break;
                                 case 'error':
                                     $status_class = 'status-error';
                                     $status_icon = '❌';
@@ -1427,6 +1542,18 @@ class Gumroad_Connect {
                                             <tr>
                                                 <td><strong>Roles Assigned:</strong></td>
                                                 <td><?php echo esc_html(implode(', ', $result['roles'])); ?></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if (isset($result['roles_removed'])): ?>
+                                            <tr>
+                                                <td><strong>Roles Removed:</strong></td>
+                                                <td><?php echo esc_html(implode(', ', $result['roles_removed'])); ?></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if (isset($result['subscription_id'])): ?>
+                                            <tr>
+                                                <td><strong>Subscription ID:</strong></td>
+                                                <td><code><?php echo esc_html($result['subscription_id']); ?></code></td>
                                             </tr>
                                         <?php endif; ?>
                                         <tr>
@@ -1764,6 +1891,11 @@ class Gumroad_Connect {
         .user-log-entry.status-skipped {
             border-color: #999;
             background: #f5f5f5;
+        }
+        
+        .user-log-entry.status-cancelled {
+            border-color: #ff6b00;
+            background: #fff5ed;
         }
         
         .user-log-header {
