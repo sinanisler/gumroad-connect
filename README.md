@@ -11,8 +11,10 @@ Connect WordPress with Gumroad webhooks to automatically create user accounts an
 <img width="627" height="357" alt="image" src="https://github.com/user-attachments/assets/eca4cb3b-a9cb-4e4e-92d5-718f7ed54bf9" />
 </a>
 
-Screenshot:
-<img width="1374" height="918" alt="image" src="https://github.com/user-attachments/assets/90b7786b-b6af-4af7-8ff6-b87264e68e7e" />
+Screenshots:
+<img width="46%" height="auto" alt="image" src="https://github.com/user-attachments/assets/90b7786b-b6af-4af7-8ff6-b87264e68e7e" />
+<img width="46%" height="auto" alt="image" src="https://github.com/user-attachments/assets/5f1ca4eb-84fb-42aa-bbf9-7e197f597a91" />
+
 
 
 ## Features
