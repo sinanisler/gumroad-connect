@@ -5,6 +5,11 @@
 
 Connect WordPress with Gumroad webhooks to automatically create user accounts and manage subscriptions.
 
+## Support
+On github I only give bug fix support on [issues](https://github.com/sinanisler/gumroad-connect/issues).
+
+If you need paid setup  or training help contact me:  sinan@sinanisler.com
+I can kickstart your membership site easily. 😉
 
 ## Features
 
