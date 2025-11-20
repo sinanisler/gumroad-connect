@@ -8,14 +8,14 @@ Connect WordPress with Gumroad webhooks to automatically create user accounts an
 
 ## Features
 
--✅ **Automatic User Creation** - Creates WordPress users when customers purchase
--✅ **Product-Specific Roles** - Assign different roles for different products
--✅ **Subscription Support** - Handles recurring payments and cancellations
--✅ **Custom Email Templates** - Full HTML support with dynamic tags
--✅ **Secure Endpoints** - Unique hash-based webhook URLs
--✅ **Comprehensive Logging** - Configurable storage limits (10-1000 entries)
--✅ **Auto Role Management** - Adds/removes roles based on purchase/cancellation
--✅ **GitHub Auto-Updates** - Updates directly from repository
+- ✅ **Automatic User Creation** - Creates WordPress users when customers purchase
+- ✅ **Product-Specific Roles** - Assign different roles for different products
+- ✅ **Subscription Support** - Handles recurring payments and cancellations
+- ✅ **Custom Email Templates** - Full HTML support with dynamic tags
+- ✅ **Secure Endpoints** - Unique hash-based webhook URLs
+- ✅ **Comprehensive Logging** - Configurable storage limits (10-1000 entries)
+- ✅ **Auto Role Management** - Adds/removes roles based on purchase/cancellation
+- ✅ **GitHub Auto-Updates** - Updates directly from repository
 
 
 ## Tutorial Video
