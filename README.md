@@ -1,6 +1,13 @@
 # Gumroad Connect
 
+
+**If you saved time and money with this project. Support it 😉**
+
 [![Sponsor me](https://img.shields.io/badge/Consider_Supporting_My_Projects_❤-GitHub-d46)](https://github.com/sponsors/sinanisler)
+
+
+
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sinanisler/gumroad-connect)
 
 Connect WordPress with Gumroad webhooks to automatically create user accounts and manage subscriptions.
