@@ -54,9 +54,9 @@ class Gumroad_Connect {
         add_filter('manage_users_columns', array($this, 'add_user_meta_column'));
         add_filter('manage_users_custom_column', array($this, 'show_user_meta_column_content'), 10, 3);
         
-        // Add metabox to user edit page
-        add_action('show_user_profile', array($this, 'show_gumroad_meta_box'));
-        add_action('edit_user_profile', array($this, 'show_gumroad_meta_box'));
+        // Add Gumroad debug metabox to user edit page
+        add_action('edit_user_profile', array($this, 'display_gumroad_debug_metabox'));
+        add_action('show_user_profile', array($this, 'display_gumroad_debug_metabox'));
     }
     
     /**
@@ -688,6 +688,24 @@ class Gumroad_Connect {
             }
         }
         
+        // ============================================
+        // ENHANCED USER META STORAGE
+        // ============================================
+        
+        // Determine if this is a refund/cancellation
+        $is_refunded = isset($params['refunded']) && $params['refunded'] === 'true';
+        $is_cancelled = isset($params['cancelled']) && $params['cancelled'] === 'true';
+        
+        // Only store enhanced meta if we have a user_id and this is not just a cancellation (already handled above)
+        if ($result['user_id'] && !($is_refunded || $is_cancelled)) {
+            $this->store_enhanced_user_meta($result['user_id'], $params, $short_product_id, isset($user_roles) ? $user_roles : array(), isset($result['roles_added']) ? $result['roles_added'] : array(), isset($result['roles_removed']) ? $result['roles_removed'] : array(), $user ? 'updated' : 'created');
+        }
+        
+        // Store refund data if this is a refund
+        if ($is_refunded && $result['user_id']) {
+            $this->store_refund_meta($result['user_id'], $params, $short_product_id);
+        }
+        
         // Log user creation/update
         $this->log_user_action($result, $params);
         
@@ -711,6 +729,206 @@ class Gumroad_Connect {
         }
         
         return date('Y-m-d H:i:s', $expiry_timestamp);
+    }
+    
+    /**
+     * Store enhanced user meta for comprehensive tracking
+     */
+    private function store_enhanced_user_meta($user_id, $params, $short_product_id, $user_roles, $roles_added = array(), $roles_removed = array(), $action = 'created') {
+        // ============================================
+        // 1. PURCHASE HISTORY (Array-based, never overwrite)
+        // ============================================
+        
+        // Get existing purchase history or initialize
+        $purchase_history = get_user_meta($user_id, 'gumroad_purchase_history', true);
+        if (!is_array($purchase_history)) {
+            $purchase_history = array();
+        }
+        
+        // Add new purchase to history
+        $purchase_entry = array(
+            'sale_id' => isset($params['sale_id']) ? $params['sale_id'] : '',
+            'product_id' => isset($params['short_product_id']) ? $params['short_product_id'] : '',
+            'product_name' => isset($params['product_name']) ? $params['product_name'] : '',
+            'price' => isset($params['price']) ? intval($params['price']) : 0,
+            'currency' => isset($params['currency']) ? $params['currency'] : 'usd',
+            'quantity' => isset($params['quantity']) ? intval($params['quantity']) : 1,
+            'date' => current_time('mysql'),
+            'timestamp' => time(),
+            'is_test' => isset($params['test']) && $params['test'] === 'true',
+            'is_recurring' => isset($params['is_recurring_charge']) && $params['is_recurring_charge'] === 'true',
+            'offer_code' => isset($params['offer_code']) ? $params['offer_code'] : '',
+            'affiliate' => isset($params['affiliate']) ? $params['affiliate'] : '',
+            'affiliate_email' => isset($params['affiliate_email']) ? $params['affiliate_email'] : '',
+            'referrer' => isset($params['referrer']) ? $params['referrer'] : '',
+            'ip_country' => isset($params['ip_country']) ? $params['ip_country'] : '',
+            'license_key' => isset($params['license_key']) ? $params['license_key'] : '',
+            'variants' => isset($params['variants']) ? $params['variants'] : '',
+            'custom_fields' => isset($params['custom_fields']) ? $params['custom_fields'] : array(),
+        );
+        
+        // Prevent duplicate entries (same sale_id)
+        $sale_exists = false;
+        foreach ($purchase_history as $existing) {
+            if ($existing['sale_id'] === $purchase_entry['sale_id']) {
+                $sale_exists = true;
+                break;
+            }
+        }
+        if (!$sale_exists) {
+            array_unshift($purchase_history, $purchase_entry); // Newest first
+            $purchase_history = array_slice($purchase_history, 0, 100); // Keep last 100
+            update_user_meta($user_id, 'gumroad_purchase_history', $purchase_history);
+        }
+        
+        // ============================================
+        // 2. AGGREGATE STATS (Quick lookups)
+        // ============================================
+        
+        // Total purchase count
+        $purchase_count = get_user_meta($user_id, 'gumroad_purchase_count', true);
+        $purchase_count = intval($purchase_count) + 1;
+        update_user_meta($user_id, 'gumroad_purchase_count', $purchase_count);
+        
+        // Total lifetime value (in cents)
+        $lifetime_value = get_user_meta($user_id, 'gumroad_lifetime_value', true);
+        $lifetime_value = intval($lifetime_value) + (isset($params['price']) ? intval($params['price']) : 0);
+        update_user_meta($user_id, 'gumroad_lifetime_value', $lifetime_value);
+        
+        // First purchase date (never overwrite)
+        $first_purchase = get_user_meta($user_id, 'gumroad_first_purchase_date', true);
+        if (empty($first_purchase)) {
+            update_user_meta($user_id, 'gumroad_first_purchase_date', current_time('mysql'));
+        }
+        
+        // Last purchase date (always update)
+        update_user_meta($user_id, 'gumroad_last_purchase_date', current_time('mysql'));
+        
+        // All product IDs purchased (array)
+        $all_products = get_user_meta($user_id, 'gumroad_all_products', true);
+        if (!is_array($all_products)) {
+            $all_products = array();
+        }
+        $product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+        if ($product_id && !in_array($product_id, $all_products)) {
+            $all_products[] = $product_id;
+            update_user_meta($user_id, 'gumroad_all_products', $all_products);
+        }
+        
+        // ============================================
+        // 3. CUSTOMER CONTEXT
+        // ============================================
+        
+        // Store customer info from Gumroad (first time or update)
+        if (isset($params['purchaser_id'])) {
+            update_user_meta($user_id, 'gumroad_purchaser_id', $params['purchaser_id']);
+        }
+        
+        if (isset($params['ip_country']) && !empty($params['ip_country'])) {
+            update_user_meta($user_id, 'gumroad_country', $params['ip_country']);
+        }
+        
+        // Card info (last 4 digits for reference)
+        if (isset($params['card']) && is_array($params['card'])) {
+            $card_info = array(
+                'type' => isset($params['card']['visual']) ? $params['card']['visual'] : '',
+                'last4' => isset($params['card']['last_four']) ? $params['card']['last_four'] : '',
+                'expiry' => isset($params['card']['expiry_month']) && isset($params['card']['expiry_year']) ? $params['card']['expiry_month'] . '/' . $params['card']['expiry_year'] : '',
+            );
+            update_user_meta($user_id, 'gumroad_card_info', $card_info);
+        }
+        
+        // ============================================
+        // 4. SUBSCRIPTION-SPECIFIC (Per-product)
+        // ============================================
+        
+        $subscription_id = isset($params['subscription_id']) ? $params['subscription_id'] : '';
+        if (!empty($subscription_id)) {
+            // Payment success count for this product
+            $payment_count_key = 'gumroad_payment_count_' . $short_product_id;
+            $payment_count = get_user_meta($user_id, $payment_count_key, true);
+            $payment_count = intval($payment_count) + 1;
+            update_user_meta($user_id, $payment_count_key, $payment_count);
+            
+            // Subscription charge count (from Gumroad)
+            if (isset($params['subscription_duration'])) {
+                update_user_meta($user_id, 'gumroad_subscription_duration_' . $short_product_id, $params['subscription_duration']);
+            }
+        }
+        
+        // ============================================
+        // 5. ROLE CHANGE AUDIT LOG
+        // ============================================
+        
+        $role_change_log = get_user_meta($user_id, 'gumroad_role_change_log', true);
+        if (!is_array($role_change_log)) {
+            $role_change_log = array();
+        }
+        
+        $role_change_entry = array(
+            'date' => current_time('mysql'),
+            'action' => $action,
+            'product_id' => $short_product_id,
+            'roles_added' => !empty($roles_added) ? $roles_added : $user_roles,
+            'roles_removed' => $roles_removed,
+            'triggered_by' => 'webhook',
+            'sale_id' => isset($params['sale_id']) ? $params['sale_id'] : '',
+        );
+        
+        array_unshift($role_change_log, $role_change_entry);
+        $role_change_log = array_slice($role_change_log, 0, 50); // Keep last 50
+        update_user_meta($user_id, 'gumroad_role_change_log', $role_change_log);
+        
+        // ============================================
+        // 6. WEBHOOK DEBUG INFO
+        // ============================================
+        
+        // Last webhook received
+        update_user_meta($user_id, 'gumroad_last_webhook_date', current_time('mysql'));
+        update_user_meta($user_id, 'gumroad_last_webhook_type', isset($params['resource_name']) ? $params['resource_name'] : 'sale');
+        
+        // Webhook count
+        $webhook_count = get_user_meta($user_id, 'gumroad_webhook_count', true);
+        update_user_meta($user_id, 'gumroad_webhook_count', intval($webhook_count) + 1);
+        
+        // Store test purchase flag prominently
+        if (isset($params['test']) && $params['test'] === 'true') {
+            update_user_meta($user_id, 'gumroad_is_test_user', true);
+        }
+    }
+    
+    /**
+     * Store refund metadata
+     */
+    private function store_refund_meta($user_id, $params, $short_product_id) {
+        // ============================================
+        // REFUND/CANCELLATION TRACKING (Per-product)
+        // ============================================
+        
+        // Refund history
+        $refund_history = get_user_meta($user_id, 'gumroad_refund_history', true);
+        if (!is_array($refund_history)) {
+            $refund_history = array();
+        }
+        
+        $refund_entry = array(
+            'sale_id' => isset($params['sale_id']) ? $params['sale_id'] : '',
+            'product_id' => $short_product_id,
+            'product_name' => isset($params['product_name']) ? $params['product_name'] : '',
+            'refund_date' => current_time('mysql'),
+            'original_price' => isset($params['price']) ? intval($params['price']) : 0,
+        );
+        
+        array_unshift($refund_history, $refund_entry);
+        update_user_meta($user_id, 'gumroad_refund_history', $refund_history);
+        
+        // Refund count
+        $refund_count = get_user_meta($user_id, 'gumroad_refund_count', true);
+        update_user_meta($user_id, 'gumroad_refund_count', intval($refund_count) + 1);
+        
+        // Per-product refund flag
+        update_user_meta($user_id, 'gumroad_refunded_' . $short_product_id, true);
+        update_user_meta($user_id, 'gumroad_refund_date_' . $short_product_id, current_time('mysql'));
     }
     
     /**
@@ -2407,40 +2625,44 @@ class Gumroad_Connect {
     }
     
     /**
-     * Show User Meta column content - displays ALL Gumroad meta fields
+     * Show User Meta column content
      */
     public function show_user_meta_column_content($value, $column_name, $user_id) {
         if ($column_name !== 'gumroad_user_meta') {
             return $value;
         }
         
-        // Get ALL Gumroad-related meta for this user
+        // Get ALL user meta for this user
         global $wpdb;
-        $gumroad_meta = $wpdb->get_results(
+        $user_meta = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d AND meta_key LIKE 'gumroad%%' ORDER BY meta_key ASC",
+                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d ORDER BY meta_key ASC",
                 $user_id
             ),
             ARRAY_A
         );
         
-        if (empty($gumroad_meta)) {
-            return '<span style="color: #999;">No Gumroad data</span>';
+        if (empty($user_meta)) {
+            return '<span style="color: #999;">No meta data</span>';
         }
         
-        // Count total Gumroad meta entries
-        $meta_count = count($gumroad_meta);
+        // Generate a unique ID for this user's collapsible section
+        $collapse_id = 'user-meta-' . $user_id;
+        
+        // Count total meta entries
+        $meta_count = count($user_meta);
         
         // Build the collapsible content
         $output = '<details class="gumroad-user-meta-details">';
         $output .= '<summary class="gumroad-user-meta-summary">';
-        $output .= '<strong>🎯 ' . $meta_count . ' Gumroad ' . ($meta_count === 1 ? 'Field' : 'Fields') . '</strong>';
+        $output .= '<strong>📋 View ' . $meta_count . ' Meta ' . ($meta_count === 1 ? 'Field' : 'Fields') . '</strong>';
         $output .= '</summary>';
         $output .= '<div class="gumroad-user-meta-content">';
         $output .= '<table class="gumroad-user-meta-table">';
+        $output .= '<thead><tr><th style="width: 35%;">Meta Key</th><th>Meta Value</th></tr></thead>';
         $output .= '<tbody>';
         
-        foreach ($gumroad_meta as $meta) {
+        foreach ($user_meta as $meta) {
             $meta_key = esc_html($meta['meta_key']);
             $meta_value = $meta['meta_value'];
             
@@ -2460,7 +2682,10 @@ class Gumroad_Connect {
                 }
             }
             
-            $output .= '<tr class="gumroad-meta-highlight">';
+            // Highlight Gumroad-specific meta keys
+            $row_class = (strpos($meta_key, 'gumroad') !== false) ? ' class="gumroad-meta-highlight"' : '';
+            
+            $output .= '<tr' . $row_class . '>';
             $output .= '<td><code>' . $meta_key . '</code></td>';
             $output .= '<td>' . $meta_value_display . '</td>';
             $output .= '</tr>';
@@ -2495,168 +2720,6 @@ class Gumroad_Connect {
         </script>';
         
         return $output;
-    }
-    
-    /**
-     * Display Gumroad Debug Metabox on User Edit Page
-     */
-    public function show_gumroad_meta_box($user) {
-        // Get ALL Gumroad-related meta for this user
-        global $wpdb;
-        $gumroad_meta = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d AND meta_key LIKE 'gumroad%%' ORDER BY meta_key ASC",
-                $user->ID
-            ),
-            ARRAY_A
-        );
-        
-        // Get product info for better display
-        $products = get_option($this->products_option, array());
-        
-        ?>
-        <h2>🎯 Gumroad Connect - Debug Information</h2>
-        <table class="form-table" role="presentation">
-            <tbody>
-                <tr>
-                    <th scope="row">Gumroad Metadata</th>
-                    <td>
-                        <?php if (empty($gumroad_meta)): ?>
-                            <p style="color: #999; font-style: italic;">No Gumroad data found for this user.</p>
-                            <p class="description">This user has not made any Gumroad purchases or hasn't been created through Gumroad Connect.</p>
-                        <?php else: ?>
-                            <div class="gumroad-debug-box" style="background: #f9f9f9; border: 2px solid #2271b1; border-radius: 6px; padding: 20px; margin-top: 10px;">
-                                <h3 style="margin-top: 0; color: #2271b1;">📊 All Gumroad Fields (<?php echo count($gumroad_meta); ?>)</h3>
-                                
-                                <table class="widefat striped" style="background: white;">
-                                    <thead>
-                                        <tr>
-                                            <th style="width: 35%;">Meta Key</th>
-                                            <th style="width: 50%;">Value</th>
-                                            <th style="width: 15%;">Scope</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php 
-                                        // Define meta field descriptions and scopes
-                                        $meta_descriptions = array(
-                                            'gumroad_sale_id' => array('scope' => 'Global', 'desc' => 'Last sale ID'),
-                                            'gumroad_product_name' => array('scope' => 'Global', 'desc' => 'Last product name'),
-                                            'gumroad_purchase_date' => array('scope' => 'Global', 'desc' => 'Last purchase date'),
-                                            'gumroad_subscription_id' => array('scope' => 'Global', 'desc' => 'Subscription ID'),
-                                            'gumroad_is_recurring' => array('scope' => 'Global', 'desc' => 'Recurring flag'),
-                                            'gumroad_recurrence' => array('scope' => 'Global', 'desc' => 'Recurrence type'),
-                                            'gumroad_subscription_status' => array('scope' => 'Global', 'desc' => 'Subscription status'),
-                                            'gumroad_subscription_start' => array('scope' => 'Global', 'desc' => 'Start date'),
-                                            'gumroad_subscription_cancelled_date' => array('scope' => 'Global', 'desc' => 'Cancel date'),
-                                            'gumroad_last_payment' => array('scope' => 'Global', 'desc' => 'Last payment'),
-                                        );
-                                        
-                                        foreach ($gumroad_meta as $meta):
-                                            $meta_key = $meta['meta_key'];
-                                            $meta_value = $meta['meta_value'];
-                                            
-                                            // Determine scope
-                                            $scope = 'Global';
-                                            $is_per_product = false;
-                                            $product_id_match = null;
-                                            
-                                            // Check if this is a per-product meta
-                                            if (preg_match('/gumroad_(?:membership_type|membership_product|membership_start|last_payment|membership_expiry|membership_status|grace_period_start)_(.+)$/', $meta_key, $matches)) {
-                                                $scope = 'Per-product';
-                                                $is_per_product = true;
-                                                $product_id_match = $matches[1];
-                                            }
-                                            
-                                            // Try to unserialize if it's serialized data
-                                            $unserialized = @maybe_unserialize($meta_value);
-                                            if (is_array($unserialized) || is_object($unserialized)) {
-                                                $display_value = '<pre style="margin: 0; font-size: 11px; max-height: 150px; overflow-y: auto; background: #f6f7f7; padding: 8px; border-radius: 3px;">' . esc_html(print_r($unserialized, true)) . '</pre>';
-                                            } else {
-                                                $display_value = esc_html($meta_value);
-                                                
-                                                // Format dates for better readability
-                                                if (strpos($meta_key, 'date') !== false || strpos($meta_key, 'start') !== false || strpos($meta_key, 'payment') !== false || strpos($meta_key, 'expiry') !== false) {
-                                                    if (strtotime($meta_value)) {
-                                                        $timestamp = strtotime($meta_value);
-                                                        $display_value .= '<br><span style="color: #666; font-size: 11px;">(' . human_time_diff($timestamp, current_time('timestamp')) . ' ago)</span>';
-                                                    }
-                                                }
-                                                
-                                                // Add status badges
-                                                if ($meta_key === 'gumroad_subscription_status' || strpos($meta_key, 'membership_status') !== false) {
-                                                    $status_colors = array(
-                                                        'active' => '#46b450',
-                                                        'cancelled' => '#dc3232',
-                                                        'expired' => '#999',
-                                                        'grace_period' => '#ffb900'
-                                                    );
-                                                    $color = isset($status_colors[$meta_value]) ? $status_colors[$meta_value] : '#666';
-                                                    $display_value = '<span style="background: ' . $color . '; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold; font-size: 11px;">' . esc_html(strtoupper($meta_value)) . '</span>';
-                                                }
-                                            }
-                                            
-                                            // Add product name for per-product fields
-                                            $key_display = '<code style="background: #2271b1; color: white; padding: 3px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">' . esc_html($meta_key) . '</code>';
-                                            if ($is_per_product && $product_id_match && isset($products[$product_id_match])) {
-                                                $key_display .= '<br><span style="color: #666; font-size: 11px; margin-top: 4px; display: inline-block;">📦 Product: ' . esc_html($products[$product_id_match]['name']) . '</span>';
-                                            }
-                                            
-                                            $scope_badge_color = ($scope === 'Global') ? '#8c4fff' : '#ff6b00';
-                                        ?>
-                                        <tr>
-                                            <td><?php echo $key_display; ?></td>
-                                            <td style="word-break: break-word;"><?php echo $display_value; ?></td>
-                                            <td>
-                                                <span style="background: <?php echo $scope_badge_color; ?>; color: white; padding: 3px 8px; border-radius: 3px; font-size: 10px; font-weight: bold;"><?php echo esc_html($scope); ?></span>
-                                            </td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                                
-                                <div style="margin-top: 20px; padding: 15px; background: #fff8e5; border-left: 4px solid #ffb900; border-radius: 4px;">
-                                    <h4 style="margin-top: 0;">🔍 Meta Field Legend</h4>
-                                    <ul style="margin: 10px 0; padding-left: 20px; font-size: 13px;">
-                                        <li><strong>Global:</strong> Fields that apply to the user's most recent or current subscription</li>
-                                        <li><strong>Per-product:</strong> Fields specific to each product the user has purchased</li>
-                                        <li>Product ID is appended to per-product fields (e.g., <code>_abcd1234</code>)</li>
-                                    </ul>
-                                </div>
-                                
-                                <div style="margin-top: 15px; padding: 15px; background: #e7f5fe; border-left: 4px solid #2271b1; border-radius: 4px;">
-                                    <h4 style="margin-top: 0;">📋 Available Global Fields</h4>
-                                    <ul style="margin: 10px 0; padding-left: 20px; font-size: 12px; columns: 2; column-gap: 20px;">
-                                        <li><code>gumroad_sale_id</code> - Last sale ID</li>
-                                        <li><code>gumroad_product_name</code> - Last product name</li>
-                                        <li><code>gumroad_purchase_date</code> - Last purchase date</li>
-                                        <li><code>gumroad_subscription_id</code> - Subscription ID</li>
-                                        <li><code>gumroad_is_recurring</code> - Recurring flag</li>
-                                        <li><code>gumroad_recurrence</code> - Recurrence type</li>
-                                        <li><code>gumroad_subscription_status</code> - Subscription status</li>
-                                        <li><code>gumroad_subscription_start</code> - Start date</li>
-                                        <li><code>gumroad_subscription_cancelled_date</code> - Cancel date</li>
-                                        <li><code>gumroad_last_payment</code> - Last payment</li>
-                                    </ul>
-                                    
-                                    <h4 style="margin-top: 15px;">📦 Available Per-Product Fields</h4>
-                                    <ul style="margin: 10px 0; padding-left: 20px; font-size: 12px; columns: 2; column-gap: 20px;">
-                                        <li><code>gumroad_membership_type_{product_id}</code> - Monthly/Yearly</li>
-                                        <li><code>gumroad_membership_product_{product_id}</code> - Product ID</li>
-                                        <li><code>gumroad_membership_start_{product_id}</code> - Start date</li>
-                                        <li><code>gumroad_last_payment_{product_id}</code> - Last payment</li>
-                                        <li><code>gumroad_membership_expiry_{product_id}</code> - Expiry date</li>
-                                        <li><code>gumroad_membership_status_{product_id}</code> - Status</li>
-                                        <li><code>gumroad_grace_period_start_{product_id}</code> - Grace start</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        <?php endif; ?>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        <?php
     }
     
     /**
@@ -3335,6 +3398,295 @@ class Gumroad_Connect {
             text-decoration: none;
         }
         ';
+    }
+    
+    /**
+     * Display Gumroad Debug Metabox on user edit page
+     */
+    public function display_gumroad_debug_metabox($user) {
+        // Get ALL user meta for this user
+        global $wpdb;
+        $all_meta = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d ORDER BY meta_key ASC",
+                $user->ID
+            ),
+            ARRAY_A
+        );
+        
+        // Filter Gumroad-specific meta
+        $gumroad_meta = array();
+        $other_meta = array();
+        
+        foreach ($all_meta as $meta) {
+            if (strpos($meta['meta_key'], 'gumroad') !== false) {
+                $gumroad_meta[] = $meta;
+            } else {
+                $other_meta[] = $meta;
+            }
+        }
+        
+        ?>
+        <h2 id="gumroad-debug-info">🔍 Gumroad Connect - Debug Information</h2>
+        <table class="form-table gumroad-debug-table" role="presentation">
+            <tbody>
+                <tr>
+                    <th colspan="2">
+                        <div style="background: linear-gradient(135deg, #2271b1 0%, #135e96 100%); color: white; padding: 15px 20px; margin: -10px -10px 20px -10px; border-radius: 6px;">
+                            <h3 style="margin: 0; color: white; font-size: 16px;">📊 Complete User Meta Overview</h3>
+                            <p style="margin: 5px 0 0 0; font-size: 13px; opacity: 0.9;">View all stored metadata for debugging and verification purposes</p>
+                        </div>
+                    </th>
+                </tr>
+                
+                <!-- Gumroad Meta Section -->
+                <?php if (!empty($gumroad_meta)): ?>
+                <tr>
+                    <th colspan="2" style="background: #fff8e5; padding: 12px; border-left: 4px solid #f59e0b;">
+                        <strong style="font-size: 15px; color: #92400e;">🛒 Gumroad-Specific Meta (<?php echo count($gumroad_meta); ?> entries)</strong>
+                        <p style="margin: 5px 0 0 0; color: #78350f; font-weight: normal; font-size: 13px;">
+                            All metadata keys containing "gumroad" - tracking purchases, subscriptions, and user history
+                        </p>
+                    </th>
+                </tr>
+                <tr>
+                    <td colspan="2" style="padding: 0;">
+                        <div class="gumroad-meta-container" style="max-height: 600px; overflow-y: auto; background: #fefce8; padding: 15px; border: 2px solid #fbbf24; border-radius: 4px;">
+                            <table class="widefat" style="background: white; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #f59e0b; color: white;">
+                                        <th style="padding: 10px; width: 35%; font-weight: 600;">Meta Key</th>
+                                        <th style="padding: 10px; font-weight: 600;">Meta Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($gumroad_meta as $meta): ?>
+                                        <tr style="border-bottom: 1px solid #e5e5e5;">
+                                            <td style="padding: 10px; vertical-align: top;">
+                                                <code style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 3px; font-weight: 600; font-size: 12px;">
+                                                    <?php echo esc_html($meta['meta_key']); ?>
+                                                </code>
+                                            </td>
+                                            <td style="padding: 10px; vertical-align: top;">
+                                                <?php
+                                                $meta_value = $meta['meta_value'];
+                                                $unserialized = @maybe_unserialize($meta_value);
+                                                
+                                                if (is_array($unserialized) || is_object($unserialized)) {
+                                                    echo '<pre style="margin: 0; font-size: 11px; max-height: 300px; overflow-y: auto; background: #f9fafb; padding: 10px; border-radius: 3px; border: 1px solid #e5e7eb;">';
+                                                    echo esc_html(print_r($unserialized, true));
+                                                    echo '</pre>';
+                                                } else {
+                                                    $value_text = esc_html($meta_value);
+                                                    if (strlen($value_text) > 200) {
+                                                        echo '<div class="long-value-container">';
+                                                        echo '<span class="short-value">' . esc_html(substr($value_text, 0, 200)) . '...</span>';
+                                                        echo '<span class="full-value" style="display:none;">' . esc_html($value_text) . '</span>';
+                                                        echo '<button type="button" class="button button-small toggle-value-btn" style="margin-left: 8px;">Show Full Value</button>';
+                                                        echo '</div>';
+                                                    } else {
+                                                        echo '<span>' . esc_html($value_text) . '</span>';
+                                                    }
+                                                }
+                                                ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+                <?php else: ?>
+                <tr>
+                    <td colspan="2" style="padding: 20px; text-align: center; background: #f9fafb; border: 2px dashed #d1d5db; border-radius: 4px;">
+                        <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                            ℹ️ No Gumroad metadata found for this user yet.<br>
+                            <small>Metadata will appear here after the user makes a purchase through Gumroad.</small>
+                        </p>
+                    </td>
+                </tr>
+                <?php endif; ?>
+                
+                <!-- All Other Meta Section -->
+                <tr>
+                    <th colspan="2" style="background: #e0f2fe; padding: 12px; border-left: 4px solid #0284c7; margin-top: 20px;">
+                        <strong style="font-size: 15px; color: #075985;">📋 All Other Meta (<?php echo count($other_meta); ?> entries)</strong>
+                        <p style="margin: 5px 0 0 0; color: #0c4a6e; font-weight: normal; font-size: 13px;">
+                            Standard WordPress and plugin metadata - roles, capabilities, settings, etc.
+                        </p>
+                    </th>
+                </tr>
+                <tr>
+                    <td colspan="2" style="padding: 0;">
+                        <details style="background: white; border: 1px solid #cbd5e1; border-radius: 4px; margin-top: 10px;">
+                            <summary style="padding: 12px 15px; cursor: pointer; background: #f1f5f9; font-weight: 600; color: #334155; border-radius: 4px;">
+                                <span style="font-size: 14px;">▶ Click to expand/collapse all other metadata</span>
+                            </summary>
+                            <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8fafc;">
+                                <table class="widefat" style="background: white; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #0284c7; color: white;">
+                                            <th style="padding: 10px; width: 35%; font-weight: 600;">Meta Key</th>
+                                            <th style="padding: 10px; font-weight: 600;">Meta Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($other_meta as $meta): ?>
+                                            <tr style="border-bottom: 1px solid #e5e5e5;">
+                                                <td style="padding: 10px; vertical-align: top;">
+                                                    <code style="background: #e0f2fe; color: #075985; padding: 4px 8px; border-radius: 3px; font-size: 11px;">
+                                                        <?php echo esc_html($meta['meta_key']); ?>
+                                                    </code>
+                                                </td>
+                                                <td style="padding: 10px; vertical-align: top; word-break: break-word;">
+                                                    <?php
+                                                    $meta_value = $meta['meta_value'];
+                                                    $unserialized = @maybe_unserialize($meta_value);
+                                                    
+                                                    if (is_array($unserialized) || is_object($unserialized)) {
+                                                        echo '<pre style="margin: 0; font-size: 11px; max-height: 200px; overflow-y: auto; background: #f9fafb; padding: 8px; border-radius: 3px; border: 1px solid #e5e7eb;">';
+                                                        echo esc_html(print_r($unserialized, true));
+                                                        echo '</pre>';
+                                                    } else {
+                                                        $value_text = esc_html($meta_value);
+                                                        if (strlen($value_text) > 200) {
+                                                            echo '<div class="long-value-container">';
+                                                            echo '<span class="short-value">' . esc_html(substr($value_text, 0, 200)) . '...</span>';
+                                                            echo '<span class="full-value" style="display:none;">' . esc_html($value_text) . '</span>';
+                                                            echo '<button type="button" class="button button-small toggle-value-btn" style="margin-left: 8px;">Show Full Value</button>';
+                                                            echo '</div>';
+                                                        } else {
+                                                            echo '<span style="font-size: 12px;">' . esc_html($value_text) . '</span>';
+                                                        }
+                                                    }
+                                                    ?>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+                
+                <!-- Quick Stats Section -->
+                <tr>
+                    <th colspan="2" style="background: #dcfce7; padding: 12px; border-left: 4px solid #16a34a; margin-top: 20px;">
+                        <strong style="font-size: 15px; color: #14532d;">📈 Quick Stats</strong>
+                    </th>
+                </tr>
+                <tr>
+                    <td colspan="2">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; padding: 15px; background: #f0fdf4; border-radius: 4px;">
+                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #86efac;">
+                                <div style="font-size: 11px; color: #15803d; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Total Meta Entries</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #16a34a;"><?php echo count($all_meta); ?></div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #fcd34d;">
+                                <div style="font-size: 11px; color: #92400e; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Gumroad Entries</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #f59e0b;"><?php echo count($gumroad_meta); ?></div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #93c5fd;">
+                                <div style="font-size: 11px; color: #1e3a8a; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Other Meta</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #2563eb;"><?php echo count($other_meta); ?></div>
+                            </div>
+                            <?php
+                            $purchase_count = get_user_meta($user->ID, 'gumroad_purchase_count', true);
+                            $lifetime_value = get_user_meta($user->ID, 'gumroad_lifetime_value', true);
+                            ?>
+                            <?php if ($purchase_count): ?>
+                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #c084fc;">
+                                <div style="font-size: 11px; color: #581c87; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Total Purchases</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #9333ea;"><?php echo intval($purchase_count); ?></div>
+                            </div>
+                            <?php endif; ?>
+                            <?php if ($lifetime_value): ?>
+                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #fda4af;">
+                                <div style="font-size: 11px; color: #881337; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Lifetime Value</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #e11d48;">$<?php echo number_format(intval($lifetime_value) / 100, 2); ?></div>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            // Toggle long value display
+            $('.toggle-value-btn').on('click', function(e) {
+                e.preventDefault();
+                var $btn = $(this);
+                var $container = $btn.closest('.long-value-container');
+                var $short = $container.find('.short-value');
+                var $full = $container.find('.full-value');
+                
+                if ($short.is(':visible')) {
+                    $short.hide();
+                    $full.show();
+                    $btn.text('Show Less');
+                } else {
+                    $short.show();
+                    $full.hide();
+                    $btn.text('Show Full Value');
+                }
+            });
+        });
+        </script>
+        
+        <style>
+        .gumroad-debug-table {
+            border: 2px solid #2271b1;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        
+        .gumroad-debug-table td,
+        .gumroad-debug-table th {
+            padding: 15px;
+        }
+        
+        .gumroad-meta-container::-webkit-scrollbar,
+        details div::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .gumroad-meta-container::-webkit-scrollbar-track,
+        details div::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        .gumroad-meta-container::-webkit-scrollbar-thumb,
+        details div::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        .gumroad-meta-container::-webkit-scrollbar-thumb:hover,
+        details div::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        details summary {
+            transition: background-color 0.2s ease;
+        }
+        
+        details summary:hover {
+            background: #e2e8f0 !important;
+        }
+        
+        details[open] summary {
+            border-bottom: 2px solid #cbd5e1;
+            border-radius: 4px 4px 0 0;
+        }
+        </style>
+        <?php
     }
 }
 
