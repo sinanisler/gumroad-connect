@@ -30,6 +30,9 @@ class Gumroad_Connect {
         // Plugin activation
         register_activation_hook(__FILE__, array($this, 'activate_plugin'));
         
+        // Plugin deactivation
+        register_deactivation_hook(__FILE__, array($this, 'deactivate_plugin'));
+        
         // Admin menu
         add_action('admin_menu', array($this, 'add_admin_menu'));
         
@@ -41,15 +44,34 @@ class Gumroad_Connect {
         
         // Admin styles
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_styles'));
+        
+        // Membership expiry cron
+        add_action('gumroad_connect_check_memberships', array($this, 'check_membership_expiry'));
     }
     
     /**
-     * Activate plugin - Generate endpoint hash
+     * Activate plugin - Generate endpoint hash and setup cron
      */
     public function activate_plugin() {
         // Generate unique endpoint hash if not exists
         if (!get_option('gumroad_connect_endpoint_hash')) {
             $this->generate_endpoint_hash();
+        }
+        
+        // Schedule daily membership check cron if not scheduled
+        if (!wp_next_scheduled('gumroad_connect_check_memberships')) {
+            wp_schedule_event(time(), 'daily', 'gumroad_connect_check_memberships');
+        }
+    }
+    
+    /**
+     * Deactivate plugin - Clean up cron
+     */
+    public function deactivate_plugin() {
+        // Clear scheduled cron
+        $timestamp = wp_next_scheduled('gumroad_connect_check_memberships');
+        if ($timestamp) {
+            wp_unschedule_event($timestamp, 'gumroad_connect_check_memberships');
         }
     }
     
@@ -171,6 +193,16 @@ class Gumroad_Connect {
             }
         } else {
             $sanitized['product_roles'] = array(); // Empty array if no product roles configured
+        }
+        
+        // Sanitize subscription type settings (monthly/yearly)
+        if (isset($input['subscription_type']) && is_array($input['subscription_type'])) {
+            $sanitized['subscription_type'] = array();
+            foreach ($input['subscription_type'] as $product_id => $type) {
+                $sanitized['subscription_type'][sanitize_text_field($product_id)] = sanitize_text_field($type);
+            }
+        } else {
+            $sanitized['subscription_type'] = array();
         }
         
         // Sanitize log limit settings (storage limits)
@@ -405,6 +437,8 @@ class Gumroad_Connect {
         
         // Check if product-specific roles are configured
         $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
+        $subscription_types = isset($settings['subscription_type']) ? $settings['subscription_type'] : array();
+        $subscription_type = isset($subscription_types[$short_product_id]) ? $subscription_types[$short_product_id] : '';
         
         // Use product-specific roles if configured, otherwise fall back to default user_roles setting
         if (!empty($short_product_id) && isset($product_roles[$short_product_id]) && !empty($product_roles[$short_product_id])) {
@@ -444,6 +478,18 @@ class Gumroad_Connect {
                 update_user_meta($user_id, 'gumroad_recurrence', $recurrence);
                 update_user_meta($user_id, 'gumroad_subscription_status', 'active');
                 update_user_meta($user_id, 'gumroad_last_payment', current_time('mysql'));
+            }
+            
+            // Handle membership expiry for monthly/yearly subscriptions
+            if (!empty($subscription_type)) {
+                update_user_meta($user_id, 'gumroad_membership_type_' . $short_product_id, $subscription_type);
+                update_user_meta($user_id, 'gumroad_membership_product_' . $short_product_id, $short_product_id);
+                update_user_meta($user_id, 'gumroad_last_payment_' . $short_product_id, current_time('mysql'));
+                
+                // Calculate expiry date (next expected payment date)
+                $expiry_date = $this->calculate_expiry_date($subscription_type);
+                update_user_meta($user_id, 'gumroad_membership_expiry_' . $short_product_id, $expiry_date);
+                update_user_meta($user_id, 'gumroad_membership_status_' . $short_product_id, 'active');
             }
             
             $result['status'] = 'existing';
@@ -503,6 +549,18 @@ class Gumroad_Connect {
                     update_user_meta($user_id, 'gumroad_subscription_start', current_time('mysql'));
                 }
                 
+                // Handle membership expiry for monthly/yearly subscriptions
+                if (!empty($subscription_type)) {
+                    update_user_meta($user_id, 'gumroad_membership_type_' . $short_product_id, $subscription_type);
+                    update_user_meta($user_id, 'gumroad_membership_product_' . $short_product_id, $short_product_id);
+                    update_user_meta($user_id, 'gumroad_last_payment_' . $short_product_id, current_time('mysql'));
+                    
+                    // Calculate expiry date (next expected payment date)
+                    $expiry_date = $this->calculate_expiry_date($subscription_type);
+                    update_user_meta($user_id, 'gumroad_membership_expiry_' . $short_product_id, $expiry_date);
+                    update_user_meta($user_id, 'gumroad_membership_status_' . $short_product_id, 'active');
+                }
+                
                 // Send welcome email with credentials
                 $email_sent = $this->send_welcome_email($user_id, $email, $username, $password, $product_name);
                 
@@ -519,6 +577,144 @@ class Gumroad_Connect {
         $this->log_user_action($result, $params);
         
         return $result;
+    }
+    
+    /**
+     * Calculate membership expiry date based on subscription type
+     */
+    private function calculate_expiry_date($subscription_type) {
+        $current_time = current_time('timestamp');
+        
+        if ($subscription_type === 'monthly') {
+            // Add 30 days
+            $expiry_timestamp = strtotime('+30 days', $current_time);
+        } elseif ($subscription_type === 'yearly') {
+            // Add 365 days
+            $expiry_timestamp = strtotime('+365 days', $current_time);
+        } else {
+            return null;
+        }
+        
+        return date('Y-m-d H:i:s', $expiry_timestamp);
+    }
+    
+    /**
+     * Check membership expiry and remove roles for expired memberships
+     * Runs daily via WordPress cron
+     */
+    public function check_membership_expiry() {
+        global $wpdb;
+        
+        // Get all products with subscription types configured
+        $settings = get_option($this->option_name, array());
+        $subscription_types = isset($settings['subscription_type']) ? $settings['subscription_type'] : array();
+        $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
+        
+        if (empty($subscription_types)) {
+            return; // No subscription products configured
+        }
+        
+        $current_time = current_time('mysql');
+        $grace_period_days = 7;
+        
+        // Check each product with subscription settings
+        foreach ($subscription_types as $product_id => $subscription_type) {
+            if (empty($subscription_type)) {
+                continue; // Skip one-time purchases
+            }
+            
+            // Get users with this product's membership
+            $meta_key = 'gumroad_membership_product_' . $product_id;
+            $expiry_key = 'gumroad_membership_expiry_' . $product_id;
+            $status_key = 'gumroad_membership_status_' . $product_id;
+            
+            // Find users with this product membership
+            $users = get_users(array(
+                'meta_key' => $meta_key,
+                'meta_value' => $product_id,
+                'fields' => 'ID'
+            ));
+            
+            foreach ($users as $user_id) {
+                $expiry_date = get_user_meta($user_id, $expiry_key, true);
+                $membership_status = get_user_meta($user_id, $status_key, true);
+                
+                if (empty($expiry_date) || $membership_status === 'expired') {
+                    continue;
+                }
+                
+                // Check if membership has expired + grace period
+                $expiry_timestamp = strtotime($expiry_date);
+                $grace_end_timestamp = strtotime('+' . $grace_period_days . ' days', $expiry_timestamp);
+                $current_timestamp = strtotime($current_time);
+                
+                // Check if we're in grace period
+                if ($current_timestamp > $expiry_timestamp && $current_timestamp <= $grace_end_timestamp) {
+                    // In grace period - update status but keep roles
+                    if ($membership_status !== 'grace_period') {
+                        update_user_meta($user_id, $status_key, 'grace_period');
+                        
+                        // Optional: Send grace period notification email
+                        $user = get_user_by('ID', $user_id);
+                        $days_left = ceil(($grace_end_timestamp - $current_timestamp) / DAY_IN_SECONDS);
+                        $this->send_grace_period_email($user, $product_id, $days_left);
+                    }
+                }
+                // Check if grace period has ended
+                elseif ($current_timestamp > $grace_end_timestamp) {
+                    // Grace period ended - remove roles
+                    $user = new WP_User($user_id);
+                    
+                    // Get roles for this product
+                    $roles_to_remove = isset($product_roles[$product_id]) ? $product_roles[$product_id] : array();
+                    
+                    foreach ($roles_to_remove as $role) {
+                        $user->remove_role($role);
+                    }
+                    
+                    // Update membership status
+                    update_user_meta($user_id, $status_key, 'expired');
+                    
+                    // Optional: Send expiry notification email
+                    $this->send_expiry_email($user, $product_id);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Send grace period notification email
+     */
+    private function send_grace_period_email($user, $product_id, $days_left) {
+        $products = get_option($this->products_option, array());
+        $product_name = isset($products[$product_id]['name']) ? $products[$product_id]['name'] : 'Product';
+        
+        $subject = 'Your membership for ' . $product_name . ' is expiring soon';
+        $message = '<p>Hi ' . esc_html($user->display_name) . ',</p>';
+        $message .= '<p>Your membership for <strong>' . esc_html($product_name) . '</strong> has not been renewed yet.</p>';
+        $message .= '<p>You have <strong>' . $days_left . ' day(s)</strong> remaining in your grace period.</p>';
+        $message .= '<p>Please complete your payment on Gumroad to continue your membership.</p>';
+        $message .= '<p>If payment is not received, your access will be removed after the grace period.</p>';
+        
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+        wp_mail($user->user_email, $subject, $message, $headers);
+    }
+    
+    /**
+     * Send membership expiry notification email
+     */
+    private function send_expiry_email($user, $product_id) {
+        $products = get_option($this->products_option, array());
+        $product_name = isset($products[$product_id]['name']) ? $products[$product_id]['name'] : 'Product';
+        
+        $subject = 'Your membership for ' . $product_name . ' has expired';
+        $message = '<p>Hi ' . esc_html($user->display_name) . ',</p>';
+        $message .= '<p>Your membership for <strong>' . esc_html($product_name) . '</strong> has expired.</p>';
+        $message .= '<p>Your access has been removed. To restore your membership, please purchase again on Gumroad.</p>';
+        $message .= '<p>Thank you for being a member!</p>';
+        
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+        wp_mail($user->user_email, $subject, $message, $headers);
     }
     
     /**
@@ -835,6 +1031,8 @@ class Gumroad_Connect {
                                                 <?php 
                                                 $assigned_roles = isset($product_roles[$product_id]) ? $product_roles[$product_id] : array();
                                                 $has_roles = !empty($assigned_roles);
+                                                $subscription_types = isset($settings['subscription_type']) ? $settings['subscription_type'] : array();
+                                                $subscription_type = isset($subscription_types[$product_id]) ? $subscription_types[$product_id] : '';
                                                 ?>
                                                 <div class="product-role-item <?php echo $has_roles ? 'active' : ''; ?>">
                                                     <div class="product-role-header">
@@ -843,6 +1041,11 @@ class Gumroad_Connect {
                                                             <code style="margin-left: 10px; color: #666;"><?php echo esc_html($product_id); ?></code>
                                                             <?php if ($has_roles): ?>
                                                                 <span class="badge badge-configured">✓ Configured</span>
+                                                            <?php endif; ?>
+                                                            <?php if ($subscription_type === 'monthly'): ?>
+                                                                <span class="badge badge-monthly">📅 Monthly</span>
+                                                            <?php elseif ($subscription_type === 'yearly'): ?>
+                                                                <span class="badge badge-yearly">📅 Yearly</span>
                                                             <?php endif; ?>
                                                         </div>
                                                         <form method="post" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this product?\n\nProduct: <?php echo esc_js($product_info['name']); ?>\nID: <?php echo esc_js($product_id); ?>\n\nThis will remove the product and its role configuration.');">
@@ -872,6 +1075,47 @@ class Gumroad_Connect {
                                                         <p class="description" style="margin-top: 8px;">
                                                             💡 Leave all unchecked to use the default "Assign User Roles" setting above.
                                                         </p>
+                                                        
+                                                        <div class="subscription-type-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
+                                                            <p class="role-section-label">Membership Management (Optional):</p>
+                                                            <div style="display: flex; gap: 20px; margin-top: 10px;">
+                                                                <label style="display: flex; align-items: center; cursor: pointer;">
+                                                                    <input 
+                                                                        type="radio" 
+                                                                        name="<?php echo esc_attr($this->option_name); ?>[subscription_type][<?php echo esc_attr($product_id); ?>]" 
+                                                                        value="monthly"
+                                                                        <?php checked($subscription_type, 'monthly'); ?>
+                                                                        style="margin-right: 5px;"
+                                                                    />
+                                                                    <strong>Monthly Membership</strong>
+                                                                </label>
+                                                                <label style="display: flex; align-items: center; cursor: pointer;">
+                                                                    <input 
+                                                                        type="radio" 
+                                                                        name="<?php echo esc_attr($this->option_name); ?>[subscription_type][<?php echo esc_attr($product_id); ?>]" 
+                                                                        value="yearly"
+                                                                        <?php checked($subscription_type, 'yearly'); ?>
+                                                                        style="margin-right: 5px;"
+                                                                    />
+                                                                    <strong>Yearly Membership</strong>
+                                                                </label>
+                                                                <label style="display: flex; align-items: center; cursor: pointer;">
+                                                                    <input 
+                                                                        type="radio" 
+                                                                        name="<?php echo esc_attr($this->option_name); ?>[subscription_type][<?php echo esc_attr($product_id); ?>]" 
+                                                                        value=""
+                                                                        <?php checked($subscription_type, ''); ?>
+                                                                        style="margin-right: 5px;"
+                                                                    />
+                                                                    <strong>One-time Purchase (Default)</strong>
+                                                                </label>
+                                                            </div>
+                                                            <p class="description" style="margin-top: 8px;">
+                                                                ⏰ Enable membership tracking with automatic role removal after expiry + 7 day grace period.<br>
+                                                                💡 If not selected, roles will be assigned permanently (one-time purchase).<br>
+                                                                🔄 Gumroad handles recurring payments - we only manage membership access based on payment timing.
+                                                            </p>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             <?php endforeach; ?>
@@ -2121,6 +2365,30 @@ class Gumroad_Connect {
             border-radius: 3px;
             font-size: 11px;
             font-weight: bold;
+        }
+        
+        .badge-monthly {
+            background: #2271b1;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .badge-yearly {
+            background: #9b51e0;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .subscription-type-section {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
         }
         
         .product-role-content {
