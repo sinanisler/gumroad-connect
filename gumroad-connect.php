@@ -3404,288 +3404,62 @@ class Gumroad_Connect {
      * Display Gumroad Debug Metabox on user edit page
      */
     public function display_gumroad_debug_metabox($user) {
-        // Get ALL user meta for this user
+        // Get Gumroad-specific meta only
         global $wpdb;
-        $all_meta = $wpdb->get_results(
+        $gumroad_meta = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d ORDER BY meta_key ASC",
-                $user->ID
+                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d AND meta_key LIKE %s ORDER BY meta_key ASC",
+                $user->ID,
+                'gumroad%'
             ),
             ARRAY_A
         );
         
-        // Filter Gumroad-specific meta
-        $gumroad_meta = array();
-        $other_meta = array();
-        
-        foreach ($all_meta as $meta) {
-            if (strpos($meta['meta_key'], 'gumroad') !== false) {
-                $gumroad_meta[] = $meta;
-            } else {
-                $other_meta[] = $meta;
-            }
-        }
-        
         ?>
-        <h2 id="gumroad-debug-info">🔍 Gumroad Connect - Debug Information</h2>
-        <table class="form-table gumroad-debug-table" role="presentation">
+        <h2>Gumroad User Meta</h2>
+        <table class="form-table">
             <tbody>
-                <tr>
-                    <th colspan="2">
-                        <div style="background: linear-gradient(135deg, #2271b1 0%, #135e96 100%); color: white; padding: 15px 20px; margin: -10px -10px 20px -10px; border-radius: 6px;">
-                            <h3 style="margin: 0; color: white; font-size: 16px;">📊 Complete User Meta Overview</h3>
-                            <p style="margin: 5px 0 0 0; font-size: 13px; opacity: 0.9;">View all stored metadata for debugging and verification purposes</p>
-                        </div>
-                    </th>
-                </tr>
-                
-                <!-- Gumroad Meta Section -->
                 <?php if (!empty($gumroad_meta)): ?>
                 <tr>
-                    <th colspan="2" style="background: #fff8e5; padding: 12px; border-left: 4px solid #f59e0b;">
-                        <strong style="font-size: 15px; color: #92400e;">🛒 Gumroad-Specific Meta (<?php echo count($gumroad_meta); ?> entries)</strong>
-                        <p style="margin: 5px 0 0 0; color: #78350f; font-weight: normal; font-size: 13px;">
-                            All metadata keys containing "gumroad" - tracking purchases, subscriptions, and user history
-                        </p>
-                    </th>
-                </tr>
-                <tr>
                     <td colspan="2" style="padding: 0;">
-                        <div class="gumroad-meta-container" style="max-height: 600px; overflow-y: auto; background: #fefce8; padding: 15px; border: 2px solid #fbbf24; border-radius: 4px;">
-                            <table class="widefat" style="background: white; border-collapse: collapse;">
-                                <thead>
-                                    <tr style="background: #f59e0b; color: white;">
-                                        <th style="padding: 10px; width: 35%; font-weight: 600;">Meta Key</th>
-                                        <th style="padding: 10px; font-weight: 600;">Meta Value</th>
+                        <table class="widefat">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40%;">Meta Key</th>
+                                    <th>Meta Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($gumroad_meta as $meta): ?>
+                                    <tr>
+                                        <td><code><?php echo esc_html($meta['meta_key']); ?></code></td>
+                                        <td>
+                                            <?php
+                                            $meta_value = $meta['meta_value'];
+                                            $unserialized = @maybe_unserialize($meta_value);
+                                            
+                                            if (is_array($unserialized) || is_object($unserialized)) {
+                                                echo '<pre style="margin: 0; font-size: 11px; max-height: 200px; overflow-y: auto;">';
+                                                echo esc_html(print_r($unserialized, true));
+                                                echo '</pre>';
+                                            } else {
+                                                echo esc_html($meta_value);
+                                            }
+                                            ?>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($gumroad_meta as $meta): ?>
-                                        <tr style="border-bottom: 1px solid #e5e5e5;">
-                                            <td style="padding: 10px; vertical-align: top;">
-                                                <code style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 3px; font-weight: 600; font-size: 12px;">
-                                                    <?php echo esc_html($meta['meta_key']); ?>
-                                                </code>
-                                            </td>
-                                            <td style="padding: 10px; vertical-align: top;">
-                                                <?php
-                                                $meta_value = $meta['meta_value'];
-                                                $unserialized = @maybe_unserialize($meta_value);
-                                                
-                                                if (is_array($unserialized) || is_object($unserialized)) {
-                                                    echo '<pre style="margin: 0; font-size: 11px; max-height: 300px; overflow-y: auto; background: #f9fafb; padding: 10px; border-radius: 3px; border: 1px solid #e5e7eb;">';
-                                                    echo esc_html(print_r($unserialized, true));
-                                                    echo '</pre>';
-                                                } else {
-                                                    $value_text = esc_html($meta_value);
-                                                    if (strlen($value_text) > 200) {
-                                                        echo '<div class="long-value-container">';
-                                                        echo '<span class="short-value">' . esc_html(substr($value_text, 0, 200)) . '...</span>';
-                                                        echo '<span class="full-value" style="display:none;">' . esc_html($value_text) . '</span>';
-                                                        echo '<button type="button" class="button button-small toggle-value-btn" style="margin-left: 8px;">Show Full Value</button>';
-                                                        echo '</div>';
-                                                    } else {
-                                                        echo '<span>' . esc_html($value_text) . '</span>';
-                                                    }
-                                                }
-                                                ?>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </td>
                 </tr>
                 <?php else: ?>
                 <tr>
-                    <td colspan="2" style="padding: 20px; text-align: center; background: #f9fafb; border: 2px dashed #d1d5db; border-radius: 4px;">
-                        <p style="margin: 0; color: #6b7280; font-size: 14px;">
-                            ℹ️ No Gumroad metadata found for this user yet.<br>
-                            <small>Metadata will appear here after the user makes a purchase through Gumroad.</small>
-                        </p>
-                    </td>
+                    <td colspan="2">No Gumroad metadata found.</td>
                 </tr>
                 <?php endif; ?>
-                
-                <!-- All Other Meta Section -->
-                <tr>
-                    <th colspan="2" style="background: #e0f2fe; padding: 12px; border-left: 4px solid #0284c7; margin-top: 20px;">
-                        <strong style="font-size: 15px; color: #075985;">📋 All Other Meta (<?php echo count($other_meta); ?> entries)</strong>
-                        <p style="margin: 5px 0 0 0; color: #0c4a6e; font-weight: normal; font-size: 13px;">
-                            Standard WordPress and plugin metadata - roles, capabilities, settings, etc.
-                        </p>
-                    </th>
-                </tr>
-                <tr>
-                    <td colspan="2" style="padding: 0;">
-                        <details style="background: white; border: 1px solid #cbd5e1; border-radius: 4px; margin-top: 10px;">
-                            <summary style="padding: 12px 15px; cursor: pointer; background: #f1f5f9; font-weight: 600; color: #334155; border-radius: 4px;">
-                                <span style="font-size: 14px;">▶ Click to expand/collapse all other metadata</span>
-                            </summary>
-                            <div style="max-height: 500px; overflow-y: auto; padding: 15px; background: #f8fafc;">
-                                <table class="widefat" style="background: white; border-collapse: collapse;">
-                                    <thead>
-                                        <tr style="background: #0284c7; color: white;">
-                                            <th style="padding: 10px; width: 35%; font-weight: 600;">Meta Key</th>
-                                            <th style="padding: 10px; font-weight: 600;">Meta Value</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($other_meta as $meta): ?>
-                                            <tr style="border-bottom: 1px solid #e5e5e5;">
-                                                <td style="padding: 10px; vertical-align: top;">
-                                                    <code style="background: #e0f2fe; color: #075985; padding: 4px 8px; border-radius: 3px; font-size: 11px;">
-                                                        <?php echo esc_html($meta['meta_key']); ?>
-                                                    </code>
-                                                </td>
-                                                <td style="padding: 10px; vertical-align: top; word-break: break-word;">
-                                                    <?php
-                                                    $meta_value = $meta['meta_value'];
-                                                    $unserialized = @maybe_unserialize($meta_value);
-                                                    
-                                                    if (is_array($unserialized) || is_object($unserialized)) {
-                                                        echo '<pre style="margin: 0; font-size: 11px; max-height: 200px; overflow-y: auto; background: #f9fafb; padding: 8px; border-radius: 3px; border: 1px solid #e5e7eb;">';
-                                                        echo esc_html(print_r($unserialized, true));
-                                                        echo '</pre>';
-                                                    } else {
-                                                        $value_text = esc_html($meta_value);
-                                                        if (strlen($value_text) > 200) {
-                                                            echo '<div class="long-value-container">';
-                                                            echo '<span class="short-value">' . esc_html(substr($value_text, 0, 200)) . '...</span>';
-                                                            echo '<span class="full-value" style="display:none;">' . esc_html($value_text) . '</span>';
-                                                            echo '<button type="button" class="button button-small toggle-value-btn" style="margin-left: 8px;">Show Full Value</button>';
-                                                            echo '</div>';
-                                                        } else {
-                                                            echo '<span style="font-size: 12px;">' . esc_html($value_text) . '</span>';
-                                                        }
-                                                    }
-                                                    ?>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </details>
-                    </td>
-                </tr>
-                
-                <!-- Quick Stats Section -->
-                <tr>
-                    <th colspan="2" style="background: #dcfce7; padding: 12px; border-left: 4px solid #16a34a; margin-top: 20px;">
-                        <strong style="font-size: 15px; color: #14532d;">📈 Quick Stats</strong>
-                    </th>
-                </tr>
-                <tr>
-                    <td colspan="2">
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; padding: 15px; background: #f0fdf4; border-radius: 4px;">
-                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #86efac;">
-                                <div style="font-size: 11px; color: #15803d; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Total Meta Entries</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #16a34a;"><?php echo count($all_meta); ?></div>
-                            </div>
-                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #fcd34d;">
-                                <div style="font-size: 11px; color: #92400e; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Gumroad Entries</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #f59e0b;"><?php echo count($gumroad_meta); ?></div>
-                            </div>
-                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #93c5fd;">
-                                <div style="font-size: 11px; color: #1e3a8a; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Other Meta</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #2563eb;"><?php echo count($other_meta); ?></div>
-                            </div>
-                            <?php
-                            $purchase_count = get_user_meta($user->ID, 'gumroad_purchase_count', true);
-                            $lifetime_value = get_user_meta($user->ID, 'gumroad_lifetime_value', true);
-                            ?>
-                            <?php if ($purchase_count): ?>
-                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #c084fc;">
-                                <div style="font-size: 11px; color: #581c87; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Total Purchases</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #9333ea;"><?php echo intval($purchase_count); ?></div>
-                            </div>
-                            <?php endif; ?>
-                            <?php if ($lifetime_value): ?>
-                            <div style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #fda4af;">
-                                <div style="font-size: 11px; color: #881337; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Lifetime Value</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #e11d48;">$<?php echo number_format(intval($lifetime_value) / 100, 2); ?></div>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-                    </td>
-                </tr>
             </tbody>
         </table>
-        
-        <script>
-        jQuery(document).ready(function($) {
-            // Toggle long value display
-            $('.toggle-value-btn').on('click', function(e) {
-                e.preventDefault();
-                var $btn = $(this);
-                var $container = $btn.closest('.long-value-container');
-                var $short = $container.find('.short-value');
-                var $full = $container.find('.full-value');
-                
-                if ($short.is(':visible')) {
-                    $short.hide();
-                    $full.show();
-                    $btn.text('Show Less');
-                } else {
-                    $short.show();
-                    $full.hide();
-                    $btn.text('Show Full Value');
-                }
-            });
-        });
-        </script>
-        
-        <style>
-        .gumroad-debug-table {
-            border: 2px solid #2271b1;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            margin-top: 20px;
-        }
-        
-        .gumroad-debug-table td,
-        .gumroad-debug-table th {
-            padding: 15px;
-        }
-        
-        .gumroad-meta-container::-webkit-scrollbar,
-        details div::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        .gumroad-meta-container::-webkit-scrollbar-track,
-        details div::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-        
-        .gumroad-meta-container::-webkit-scrollbar-thumb,
-        details div::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 4px;
-        }
-        
-        .gumroad-meta-container::-webkit-scrollbar-thumb:hover,
-        details div::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-        
-        details summary {
-            transition: background-color 0.2s ease;
-        }
-        
-        details summary:hover {
-            background: #e2e8f0 !important;
-        }
-        
-        details[open] summary {
-            border-bottom: 2px solid #cbd5e1;
-            border-radius: 4px 4px 0 0;
-        }
-        </style>
         <?php
     }
 }
