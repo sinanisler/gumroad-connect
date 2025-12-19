@@ -3,7 +3,7 @@
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
  * Description: Connect your WordPress site with Gumroad to automatically create user accounts when customers make a purchase.
- * Version: 1.26
+ * Version: 1.27
  * Author: sinanisler
  * Author URI: https://sinanisler.com
  * License: GPL v2 or later
@@ -25,6 +25,9 @@ class Gumroad_Connect {
     private $ping_log_option = 'gumroad_connect_ping_log';
     private $user_log_option = 'gumroad_connect_user_log';
     private $products_option = 'gumroad_connect_products';
+    private $failed_webhooks_option = 'gumroad_connect_failed_webhooks';
+    private $processed_sales_option = 'gumroad_connect_processed_sales';
+    private $subscription_log_option = 'gumroad_connect_subscription_log';
     
     public function __construct() {
         // Plugin activation
@@ -137,6 +140,24 @@ class Gumroad_Connect {
             'gumroad-connect-users',
             array($this, 'user_log_page')
         );
+        
+        add_submenu_page(
+            'gumroad-connect',
+            'Subscription Log',
+            'Subscription Log',
+            'manage_options',
+            'gumroad-connect-subscriptions',
+            array($this, 'subscription_log_page')
+        );
+        
+        add_submenu_page(
+            'gumroad-connect',
+            'Failed Webhooks',
+            'Failed Webhooks',
+            'manage_options',
+            'gumroad-connect-failed',
+            array($this, 'failed_webhooks_page')
+        );
     }
     
     /**
@@ -227,6 +248,12 @@ class Gumroad_Connect {
             $sanitized['user_per_page'] = max(10, min(200, $user_per_page)); // Between 10 and 200
         }
         
+        // Sanitize grace period days setting
+        if (isset($input['grace_period_days'])) {
+            $grace_period_days = intval($input['grace_period_days']);
+            $sanitized['grace_period_days'] = max(0, min(30, $grace_period_days)); // Between 0 and 30 days
+        }
+        
         return $sanitized;
     }
     
@@ -255,10 +282,35 @@ class Gumroad_Connect {
         $stored_seller_id = isset($settings['seller_id']) ? $settings['seller_id'] : '';
         $create_users = isset($settings['create_users']) ? $settings['create_users'] : true;
         
+        // Validate resource_name to ensure this is a sale event
+        $resource_name = isset($params['resource_name']) ? $params['resource_name'] : '';
+        if (!empty($resource_name) && $resource_name !== 'sale') {
+            $this->log_failed_webhook($params, 'Invalid resource type: ' . $resource_name);
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => 'Invalid resource type',
+            ), 400);
+        }
+        
+        // Idempotency check - prevent duplicate processing of same sale_id
+        $sale_id = isset($params['sale_id']) ? $params['sale_id'] : '';
+        if (!empty($sale_id)) {
+            if ($this->is_sale_already_processed($sale_id)) {
+                return new WP_REST_Response(array(
+                    'success' => true,
+                    'message' => 'Sale already processed (idempotency check)',
+                    'sale_id' => $sale_id,
+                    'duplicate' => true,
+                ), 200);
+            }
+        }
+        
         // Verify seller_id if configured
         $seller_id_match = false;
         if (!empty($stored_seller_id) && isset($params['seller_id'])) {
             $seller_id_match = ($params['seller_id'] === $stored_seller_id);
+        } else {
+            $this->log_failed_webhook($params, 'Seller ID not configured or not provided');
         }
         
         // Prepare log entry
@@ -288,11 +340,13 @@ class Gumroad_Connect {
         if ($create_users && $seller_id_match && isset($params['email'])) {
             // Check if this is a refund or cancellation
             $is_refunded = isset($params['refunded']) && $params['refunded'] === 'true';
+            $is_cancelled = isset($params['cancelled']) && $params['cancelled'] === 'true';
             $is_recurring = isset($params['is_recurring_charge']) && $params['is_recurring_charge'] === 'true';
             $has_subscription_id = isset($params['subscription_id']) && !empty($params['subscription_id']);
+            $has_recurrence = isset($params['recurrence']) && !empty($params['recurrence']);
             
             // Handle subscription cancellation or refund
-            if ($is_refunded && $has_subscription_id) {
+            if (($is_refunded || $is_cancelled) && $has_subscription_id) {
                 $user_creation_result = $this->handle_subscription_cancellation($params);
             } else {
                 // Check if product-specific roles are configured
@@ -311,6 +365,13 @@ class Gumroad_Connect {
                     );
                 }
             }
+            
+            // Mark sale as processed if successful
+            if ($user_creation_result && !empty($sale_id)) {
+                $this->mark_sale_as_processed($sale_id, $params);
+            }
+        } else if (!$seller_id_match && !empty($stored_seller_id)) {
+            $this->log_failed_webhook($params, 'Seller ID mismatch');
         }
         
         // Return success response
@@ -385,6 +446,9 @@ class Gumroad_Connect {
         // Update subscription status
         update_user_meta($user_id, 'gumroad_subscription_status', 'cancelled');
         update_user_meta($user_id, 'gumroad_subscription_cancelled_date', current_time('mysql'));
+        
+        // Log subscription cancellation
+        $this->log_subscription_change($user_id, $subscription_id, 'cancelled', $params);
         
         $result['status'] = 'cancelled';
         $result['message'] = 'Subscription cancelled. Roles removed: ' . implode(', ', $roles_removed);
@@ -473,15 +537,24 @@ class Gumroad_Connect {
             $recurrence = isset($params['recurrence']) ? $params['recurrence'] : '';
             
             if (!empty($subscription_id)) {
+                $existing_subscription_id = get_user_meta($user_id, 'gumroad_subscription_id', true);
+                $is_renewal = ($existing_subscription_id === $subscription_id);
+                
                 update_user_meta($user_id, 'gumroad_subscription_id', $subscription_id);
                 update_user_meta($user_id, 'gumroad_is_recurring', $is_recurring);
                 update_user_meta($user_id, 'gumroad_recurrence', $recurrence);
                 update_user_meta($user_id, 'gumroad_subscription_status', 'active');
                 update_user_meta($user_id, 'gumroad_last_payment', current_time('mysql'));
+                
+                // Log subscription event
+                $this->log_subscription_change($user_id, $subscription_id, $is_renewal ? 'renewal' : 'created', $params);
             }
             
             // Handle membership expiry for monthly/yearly subscriptions
             if (!empty($subscription_type)) {
+                $existing_subscription_id = get_user_meta($user_id, 'gumroad_subscription_id', true);
+                $is_renewal = !empty($subscription_id) && ($existing_subscription_id === $subscription_id);
+                
                 update_user_meta($user_id, 'gumroad_membership_type_' . $short_product_id, $subscription_type);
                 update_user_meta($user_id, 'gumroad_membership_product_' . $short_product_id, $short_product_id);
                 update_user_meta($user_id, 'gumroad_last_payment_' . $short_product_id, current_time('mysql'));
@@ -493,9 +566,20 @@ class Gumroad_Connect {
                 }
                 
                 // Calculate expiry date (next expected payment date)
+                // For renewals, always reset the expiry date from current time
                 $expiry_date = $this->calculate_expiry_date($subscription_type);
                 update_user_meta($user_id, 'gumroad_membership_expiry_' . $short_product_id, $expiry_date);
                 update_user_meta($user_id, 'gumroad_membership_status_' . $short_product_id, 'active');
+                
+                // If this is a renewal and was in grace period, remove grace period status
+                if ($is_renewal) {
+                    $previous_status = get_user_meta($user_id, 'gumroad_membership_status_' . $short_product_id, true);
+                    if ($previous_status === 'grace_period') {
+                        // Renewed during grace period - restore to active
+                        update_user_meta($user_id, 'gumroad_membership_status_' . $short_product_id, 'active');
+                        delete_user_meta($user_id, 'gumroad_grace_period_start_' . $short_product_id);
+                    }
+                }
             }
             
             $result['status'] = 'existing';
@@ -553,6 +637,9 @@ class Gumroad_Connect {
                     update_user_meta($user_id, 'gumroad_recurrence', $recurrence);
                     update_user_meta($user_id, 'gumroad_subscription_status', 'active');
                     update_user_meta($user_id, 'gumroad_subscription_start', current_time('mysql'));
+                    
+                    // Log new subscription creation
+                    $this->log_subscription_change($user_id, $subscription_id, 'created', $params);
                 }
                 
                 // Handle membership expiry for monthly/yearly subscriptions
@@ -616,13 +703,13 @@ class Gumroad_Connect {
         $settings = get_option($this->option_name, array());
         $subscription_types = isset($settings['subscription_type']) ? $settings['subscription_type'] : array();
         $product_roles = isset($settings['product_roles']) ? $settings['product_roles'] : array();
+        $grace_period_days = isset($settings['grace_period_days']) ? intval($settings['grace_period_days']) : 7;
         
         if (empty($subscription_types)) {
             return; // No subscription products configured
         }
         
         $current_time = current_time('mysql');
-        $grace_period_days = 7;
         
         // Check each product with subscription settings
         foreach ($subscription_types as $product_id => $subscription_type) {
@@ -660,11 +747,12 @@ class Gumroad_Connect {
                     // In grace period - update status but keep roles
                     if ($membership_status !== 'grace_period') {
                         update_user_meta($user_id, $status_key, 'grace_period');
+                        update_user_meta($user_id, 'gumroad_grace_period_start_' . $product_id, current_time('mysql'));
                         
-                        // Optional: Send grace period notification email
+                        // Send grace period notification email
                         $user = get_user_by('ID', $user_id);
                         $days_left = ceil(($grace_end_timestamp - $current_timestamp) / DAY_IN_SECONDS);
-                        $this->send_grace_period_email($user, $product_id, $days_left);
+                        $this->send_grace_period_email($user, $product_id, $days_left, $grace_period_days);
                     }
                 }
                 // Check if grace period has ended
@@ -692,16 +780,52 @@ class Gumroad_Connect {
     /**
      * Send grace period notification email
      */
-    private function send_grace_period_email($user, $product_id, $days_left) {
+    private function send_grace_period_email($user, $product_id, $days_left, $total_grace_days = 7) {
         $products = get_option($this->products_option, array());
         $product_name = isset($products[$product_id]['name']) ? $products[$product_id]['name'] : 'Product';
+        $site_name = get_bloginfo('name');
+        $login_url = wp_login_url();
         
-        $subject = 'Your membership for ' . $product_name . ' is expiring soon';
-        $message = '<p>Hi ' . esc_html($user->display_name) . ',</p>';
-        $message .= '<p>Your membership for <strong>' . esc_html($product_name) . '</strong> has not been renewed yet.</p>';
-        $message .= '<p>You have <strong>' . $days_left . ' day(s)</strong> remaining in your grace period.</p>';
-        $message .= '<p>Please complete your payment on Gumroad to continue your membership.</p>';
-        $message .= '<p>If payment is not received, your access will be removed after the grace period.</p>';
+        $subject = '⚠️ Your ' . $product_name . ' membership requires attention';
+        
+        $message = '
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 2px solid #ffb900; border-radius: 8px; overflow: hidden;">
+            <div style="background: linear-gradient(135deg, #ffb900 0%, #ff8c00 100%); color: white; padding: 30px 20px; text-align: center;">
+                <h1 style="margin: 0; font-size: 28px;">⚠️ Grace Period Active</h1>
+            </div>
+            
+            <div style="padding: 30px 20px;">
+                <p style="font-size: 16px; color: #333; margin-bottom: 20px;">Hi ' . esc_html($user->display_name) . ',</p>
+                
+                <div style="background-color: #fff8e5; border-left: 4px solid #ffb900; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                    <p style="margin: 0; font-size: 15px; color: #8a6d3b;">
+                        <strong>Your membership for "' . esc_html($product_name) . '" has not been renewed.</strong>
+                    </p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
+                    <div style="font-size: 48px; color: #ff8c00; font-weight: bold; line-height: 1;">' . $days_left . '</div>
+                    <div style="font-size: 14px; color: #666; margin-top: 5px;">day(s) remaining</div>
+                    <div style="font-size: 12px; color: #999; margin-top: 10px;">Out of ' . $total_grace_days . ' day grace period</div>
+                </div>
+                
+                <h3 style="color: #333; margin-top: 30px;">What happens next?</h3>
+                <ul style="color: #666; line-height: 1.8;">
+                    <li>Your access remains <strong>active</strong> during the grace period</li>
+                    <li>If payment is completed, your membership continues automatically</li>
+                    <li>After ' . $days_left . ' day(s), your access will be removed if payment is not received</li>
+                </ul>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="' . esc_url($login_url) . '" style="display: inline-block; background: linear-gradient(135deg, #ff8c00 0%, #ff6b00 100%); color: white; padding: 15px 40px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Access Your Account</a>
+                </div>
+                
+                <p style="color: #999; font-size: 12px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e5e5;">
+                    This is an automated message from ' . esc_html($site_name) . '<br>
+                    Your payment is handled through Gumroad
+                </p>
+            </div>
+        </div>';
         
         $headers = array('Content-Type: text/html; charset=UTF-8');
         wp_mail($user->user_email, $subject, $message, $headers);
@@ -713,12 +837,45 @@ class Gumroad_Connect {
     private function send_expiry_email($user, $product_id) {
         $products = get_option($this->products_option, array());
         $product_name = isset($products[$product_id]['name']) ? $products[$product_id]['name'] : 'Product';
+        $site_name = get_bloginfo('name');
+        $site_url = get_site_url();
         
-        $subject = 'Your membership for ' . $product_name . ' has expired';
-        $message = '<p>Hi ' . esc_html($user->display_name) . ',</p>';
-        $message .= '<p>Your membership for <strong>' . esc_html($product_name) . '</strong> has expired.</p>';
-        $message .= '<p>Your access has been removed. To restore your membership, please purchase again on Gumroad.</p>';
-        $message .= '<p>Thank you for being a member!</p>';
+        $subject = 'Your ' . $product_name . ' membership has expired';
+        
+        $message = '
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 2px solid #dc3232; border-radius: 8px; overflow: hidden;">
+            <div style="background: linear-gradient(135deg, #dc3232 0%, #a00 100%); color: white; padding: 30px 20px; text-align: center;">
+                <h1 style="margin: 0; font-size: 28px;">Membership Expired</h1>
+            </div>
+            
+            <div style="padding: 30px 20px;">
+                <p style="font-size: 16px; color: #333; margin-bottom: 20px;">Hi ' . esc_html($user->display_name) . ',</p>
+                
+                <div style="background-color: #fef7f7; border-left: 4px solid #dc3232; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                    <p style="margin: 0; font-size: 15px; color: #8a2424;">
+                        <strong>Your membership for "' . esc_html($product_name) . '" has expired.</strong>
+                    </p>
+                </div>
+                
+                <p style="color: #666; line-height: 1.8;">
+                    The grace period has ended and your access has been removed. We hope you enjoyed your time as a member!
+                </p>
+                
+                <h3 style="color: #333; margin-top: 30px;">Want to rejoin?</h3>
+                <p style="color: #666; line-height: 1.8;">
+                    You can restore your membership anytime by making a new purchase through Gumroad. All your previous account data is safely stored.
+                </p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="' . esc_url($site_url) . '" style="display: inline-block; background: linear-gradient(135deg, #46b450 0%, #2e7d32 100%); color: white; padding: 15px 40px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Visit ' . esc_html($site_name) . '</a>
+                </div>
+                
+                <p style="color: #999; font-size: 12px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e5e5;">
+                    Thank you for being a member of ' . esc_html($site_name) . '!<br>
+                    We hope to see you again soon.
+                </p>
+            </div>
+        </div>';
         
         $headers = array('Content-Type: text/html; charset=UTF-8');
         wp_mail($user->user_email, $subject, $message, $headers);
@@ -877,6 +1034,78 @@ class Gumroad_Connect {
             $headers[$key] = is_array($value) ? implode(', ', $value) : $value;
         }
         return $headers;
+    }
+    
+    /**
+     * Check if sale has already been processed (idempotency)
+     */
+    private function is_sale_already_processed($sale_id) {
+        $processed_sales = get_option($this->processed_sales_option, array());
+        return isset($processed_sales[$sale_id]);
+    }
+    
+    /**
+     * Mark sale as processed
+     */
+    private function mark_sale_as_processed($sale_id, $params) {
+        $processed_sales = get_option($this->processed_sales_option, array());
+        
+        // Store sale ID with timestamp and email for reference
+        $processed_sales[$sale_id] = array(
+            'processed_at' => current_time('mysql'),
+            'email' => isset($params['email']) ? $params['email'] : '',
+            'product' => isset($params['product_name']) ? $params['product_name'] : '',
+        );
+        
+        // Keep only last 1000 processed sales to prevent database bloat
+        if (count($processed_sales) > 1000) {
+            $processed_sales = array_slice($processed_sales, -1000, 1000, true);
+        }
+        
+        update_option($this->processed_sales_option, $processed_sales);
+    }
+    
+    /**
+     * Log failed webhook for manual review
+     */
+    private function log_failed_webhook($params, $reason) {
+        $failed_log = get_option($this->failed_webhooks_option, array());
+        
+        $entry = array(
+            'timestamp' => current_time('mysql'),
+            'reason' => $reason,
+            'data' => $params,
+        );
+        
+        array_unshift($failed_log, $entry);
+        $failed_log = array_slice($failed_log, 0, 100); // Keep last 100 failed webhooks
+        
+        update_option($this->failed_webhooks_option, $failed_log);
+    }
+    
+    /**
+     * Log subscription changes (created, renewed, cancelled)
+     */
+    private function log_subscription_change($user_id, $subscription_id, $event_type, $params) {
+        $subscription_log = get_option($this->subscription_log_option, array());
+        
+        $entry = array(
+            'timestamp' => current_time('mysql'),
+            'datetime_readable' => current_time('Y-m-d H:i:s'),
+            'user_id' => $user_id,
+            'subscription_id' => $subscription_id,
+            'event_type' => $event_type, // 'created', 'renewal', 'cancelled'
+            'product_name' => isset($params['product_name']) ? $params['product_name'] : '',
+            'product_id' => isset($params['short_product_id']) ? $params['short_product_id'] : '',
+            'email' => isset($params['email']) ? $params['email'] : '',
+            'recurrence' => isset($params['recurrence']) ? $params['recurrence'] : '',
+            'sale_id' => isset($params['sale_id']) ? $params['sale_id'] : '',
+        );
+        
+        array_unshift($subscription_log, $entry);
+        $subscription_log = array_slice($subscription_log, 0, 200); // Keep last 200 subscription events
+        
+        update_option($this->subscription_log_option, $subscription_log);
     }
     
     /**
@@ -1135,6 +1364,32 @@ class Gumroad_Connect {
                                             • If NO products have roles assigned, ALL purchases will create users with default roles (backward compatible)
                                         </p>
                                     <?php endif; ?>
+                                </td>
+                            </tr>
+                            
+                            <tr>
+                                <th scope="row">
+                                    <label for="grace_period_days">Grace Period (Days)</label>
+                                </th>
+                                <td>
+                                    <?php 
+                                    $grace_period_days = isset($settings['grace_period_days']) ? $settings['grace_period_days'] : 7;
+                                    ?>
+                                    <input 
+                                        type="number" 
+                                        id="grace_period_days" 
+                                        name="<?php echo esc_attr($this->option_name); ?>[grace_period_days]" 
+                                        value="<?php echo esc_attr($grace_period_days); ?>"
+                                        min="0"
+                                        max="30"
+                                        class="small-text"
+                                    />
+                                    <p class="description">
+                                        Number of days after subscription expires before roles are removed. Default: 7 days. Range: 0-30 days.<br>
+                                        🔔 During grace period, users keep their access and receive reminder emails.<br>
+                                        ⚙️ Applies to all products configured as Monthly or Yearly memberships.<br>
+                                        💡 Set to 0 for immediate role removal (not recommended).
+                                    </p>
                                 </td>
                             </tr>
                             
@@ -1883,6 +2138,255 @@ class Gumroad_Connect {
                                 </div>
                             </div>
                         <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+                
+            </div>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Subscription log page
+     */
+    public function subscription_log_page() {
+        // Handle clear log action
+        if (isset($_POST['clear_subscription_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_subscription_log')) {
+            delete_option($this->subscription_log_option);
+            echo '<div class="notice notice-success"><p>Subscription log cleared successfully!</p></div>';
+        }
+        
+        $subscription_log = get_option($this->subscription_log_option, array());
+        
+        ?>
+        <div class="wrap gumroad-connect-wrap">
+            <h1>🔄 Gumroad Connect - Subscription Log</h1>
+            
+            <div class="gumroad-connect-container">
+                
+                <div class="gumroad-card">
+                    <h2>📊 Subscription Events</h2>
+                    <p>This page shows all subscription-related events: creation, renewals, and cancellations.</p>
+                    
+                    <div style="margin-top: 20px;">
+                        <form method="post" style="display: inline;">
+                            <?php wp_nonce_field('gumroad_clear_subscription_log'); ?>
+                            <button type="submit" name="clear_subscription_log" class="button" onclick="return confirm('Are you sure you want to clear the subscription log?')">
+                                🗑️ Clear Subscription Log
+                            </button>
+                        </form>
+                        <button type="button" class="button button-primary" onclick="location.reload()">
+                            🔄 Refresh Page
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="gumroad-card">
+                    <h2>🔔 Recent Events (Last 200)</h2>
+                    
+                    <?php if (empty($subscription_log)): ?>
+                        <div class="no-pings">
+                            <p>🔍 No subscription events logged yet.</p>
+                            <p>Events will appear here when subscriptions are created, renewed, or cancelled.</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($subscription_log as $index => $entry): ?>
+                            <?php 
+                            $event_type = $entry['event_type'];
+                            $status_class = '';
+                            $status_icon = '';
+                            
+                            switch ($event_type) {
+                                case 'created':
+                                    $status_class = 'status-created';
+                                    $status_icon = '✅';
+                                    break;
+                                case 'renewal':
+                                    $status_class = 'status-existing';
+                                    $status_icon = '🔄';
+                                    break;
+                                case 'cancelled':
+                                    $status_class = 'status-cancelled';
+                                    $status_icon = '🚫';
+                                    break;
+                            }
+                            ?>
+                            
+                            <div class="user-log-entry <?php echo esc_attr($status_class); ?>">
+                                <div class="user-log-header">
+                                    <strong><?php echo $status_icon; ?> Event #<?php echo ($index + 1); ?></strong>
+                                    <span class="user-log-time"><?php echo esc_html($entry['datetime_readable']); ?></span>
+                                    <span class="badge badge-status"><?php echo esc_html(ucfirst($event_type)); ?></span>
+                                </div>
+                                
+                                <div class="user-log-content">
+                                    <table class="user-info-table">
+                                        <tr>
+                                            <td><strong>Email:</strong></td>
+                                            <td><?php echo esc_html($entry['email']); ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>User ID:</strong></td>
+                                            <td>
+                                                <a href="<?php echo admin_url('user-edit.php?user_id=' . $entry['user_id']); ?>" target="_blank">
+                                                    #<?php echo esc_html($entry['user_id']); ?>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Subscription ID:</strong></td>
+                                            <td><code><?php echo esc_html($entry['subscription_id']); ?></code></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Product:</strong></td>
+                                            <td><?php echo esc_html($entry['product_name']); ?> <code style="margin-left: 10px;"><?php echo esc_html($entry['product_id']); ?></code></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Recurrence:</strong></td>
+                                            <td><?php echo esc_html($entry['recurrence'] ? $entry['recurrence'] : 'N/A'); ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Sale ID:</strong></td>
+                                            <td><code><?php echo esc_html($entry['sale_id']); ?></code></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+                
+            </div>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Failed webhooks page
+     */
+    public function failed_webhooks_page() {
+        // Handle clear log action
+        if (isset($_POST['clear_failed_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_failed_log')) {
+            delete_option($this->failed_webhooks_option);
+            echo '<div class="notice notice-success"><p>Failed webhooks log cleared successfully!</p></div>';
+        }
+        
+        // Handle retry action
+        if (isset($_POST['retry_webhook']) && isset($_POST['webhook_index']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_retry_webhook')) {
+            $webhook_index = intval($_POST['webhook_index']);
+            $failed_log = get_option($this->failed_webhooks_option, array());
+            
+            if (isset($failed_log[$webhook_index])) {
+                $webhook_data = $failed_log[$webhook_index]['data'];
+                
+                // Create a mock request object
+                $mock_request = new WP_REST_Request('POST', '/gumroad-connect/v1/ping');
+                $mock_request->set_body_params($webhook_data);
+                
+                // Retry processing
+                $result = $this->handle_ping($mock_request);
+                
+                // Remove from failed log if successful
+                if ($result->get_status() === 200) {
+                    unset($failed_log[$webhook_index]);
+                    $failed_log = array_values($failed_log); // Reindex array
+                    update_option($this->failed_webhooks_option, $failed_log);
+                    echo '<div class="notice notice-success"><p>✅ Webhook retried successfully!</p></div>';
+                } else {
+                    echo '<div class="notice notice-error"><p>❌ Webhook retry failed: ' . esc_html($result->get_data()['message']) . '</p></div>';
+                }
+            }
+        }
+        
+        $failed_log = get_option($this->failed_webhooks_option, array());
+        
+        ?>
+        <div class="wrap gumroad-connect-wrap">
+            <h1>⚠️ Gumroad Connect - Failed Webhooks</h1>
+            
+            <div class="gumroad-connect-container">
+                
+                <div class="gumroad-card">
+                    <h2>🔧 Failed Webhook Processing</h2>
+                    <p>This page shows webhooks that failed to process. You can retry them manually.</p>
+                    
+                    <?php if (!empty($failed_log)): ?>
+                        <div class="refresh-hash-warning">
+                            <p><strong>⚠️ Common Failure Reasons:</strong></p>
+                            <ul>
+                                <li>Seller ID mismatch (check your settings)</li>
+                                <li>Invalid resource type (non-sale events)</li>
+                                <li>Missing seller ID configuration</li>
+                            </ul>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <div style="margin-top: 20px;">
+                        <form method="post" style="display: inline;">
+                            <?php wp_nonce_field('gumroad_clear_failed_log'); ?>
+                            <button type="submit" name="clear_failed_log" class="button" onclick="return confirm('Are you sure you want to clear all failed webhooks?')">
+                                🗑️ Clear Failed Log
+                            </button>
+                        </form>
+                        <button type="button" class="button button-primary" onclick="location.reload()">
+                            🔄 Refresh Page
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="gumroad-card">
+                    <h2>❌ Failed Webhooks (Last 100)</h2>
+                    
+                    <?php if (empty($failed_log)): ?>
+                        <div class="no-pings">
+                            <p>✅ No failed webhooks! Everything is working correctly.</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($failed_log as $index => $entry): ?>
+                            <div class="ping-entry" style="border-color: #dc3232; background: #fef7f7;">
+                                <div class="ping-header">
+                                    <strong>❌ Failed Webhook #<?php echo ($index + 1); ?></strong>
+                                    <span class="ping-time"><?php echo esc_html($entry['timestamp']); ?></span>
+                                    <span class="badge" style="background: #dc3232; color: white;"><?php echo esc_html($entry['reason']); ?></span>
+                                </div>
+                                
+                                <div class="ping-details">
+                                    <div class="quick-info">
+                                        <h4>Failure Reason:</h4>
+                                        <p style="color: #dc3232; font-weight: bold;"><?php echo esc_html($entry['reason']); ?></p>
+                                        
+                                        <?php if (!empty($entry['data'])): ?>
+                                            <h4 style="margin-top: 15px;">Quick Info:</h4>
+                                            <table>
+                                                <?php foreach ($entry['data'] as $key => $value): ?>
+                                                    <?php if (in_array($key, ['sale_id', 'product_name', 'email', 'price', 'seller_id', 'resource_name'])): ?>
+                                                        <tr>
+                                                            <td><strong><?php echo esc_html($key); ?>:</strong></td>
+                                                            <td><?php echo esc_html(is_array($value) ? json_encode($value) : $value); ?></td>
+                                                        </tr>
+                                                    <?php endif; ?>
+                                                <?php endforeach; ?>
+                                            </table>
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <details style="margin-top: 10px;">
+                                        <summary><strong>📦 View Full Data</strong></summary>
+                                        <pre><?php echo esc_html(json_encode($entry['data'], JSON_PRETTY_PRINT)); ?></pre>
+                                    </details>
+                                    
+                                    <div style="margin-top: 15px;">
+                                        <form method="post" style="display: inline;">
+                                            <?php wp_nonce_field('gumroad_retry_webhook'); ?>
+                                            <input type="hidden" name="webhook_index" value="<?php echo $index; ?>" />
+                                            <button type="submit" name="retry_webhook" class="button button-primary">
+                                                🔄 Retry This Webhook
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
                 
