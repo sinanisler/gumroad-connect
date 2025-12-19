@@ -486,6 +486,12 @@ class Gumroad_Connect {
                 update_user_meta($user_id, 'gumroad_membership_product_' . $short_product_id, $short_product_id);
                 update_user_meta($user_id, 'gumroad_last_payment_' . $short_product_id, current_time('mysql'));
                 
+                // Set membership start date only if not already set (first purchase)
+                $membership_start = get_user_meta($user_id, 'gumroad_membership_start_' . $short_product_id, true);
+                if (empty($membership_start)) {
+                    update_user_meta($user_id, 'gumroad_membership_start_' . $short_product_id, current_time('mysql'));
+                }
+                
                 // Calculate expiry date (next expected payment date)
                 $expiry_date = $this->calculate_expiry_date($subscription_type);
                 update_user_meta($user_id, 'gumroad_membership_expiry_' . $short_product_id, $expiry_date);
@@ -553,6 +559,7 @@ class Gumroad_Connect {
                 if (!empty($subscription_type)) {
                     update_user_meta($user_id, 'gumroad_membership_type_' . $short_product_id, $subscription_type);
                     update_user_meta($user_id, 'gumroad_membership_product_' . $short_product_id, $short_product_id);
+                    update_user_meta($user_id, 'gumroad_membership_start_' . $short_product_id, current_time('mysql'));
                     update_user_meta($user_id, 'gumroad_last_payment_' . $short_product_id, current_time('mysql'));
                     
                     // Calculate expiry date (next expected payment date)
