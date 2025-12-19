@@ -3068,12 +3068,11 @@ class Gumroad_Connect {
         .gumroad-user-meta-summary {
             cursor: pointer;
             padding: 8px 12px;
-            background: linear-gradient(135deg, #2271b1 0%, #1a5a8f 100%);
-            color: white;
+            color: black;
             border-radius: 4px;
             list-style: none;
             transition: all 0.2s ease;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background: #e5e5e5ff);
         }
         
         .gumroad-user-meta-summary::-webkit-details-marker {
@@ -3081,8 +3080,7 @@ class Gumroad_Connect {
         }
         
         .gumroad-user-meta-summary:hover {
-            background: linear-gradient(135deg, #1a5a8f 0%, #134567 100%);
-            box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+            background: #c3c3c3ff);
         }
         
         .gumroad-user-meta-summary::before {
@@ -3119,6 +3117,7 @@ class Gumroad_Connect {
             background: #2271b1;
             color: white;
             z-index: 1;
+            display:none
         }
         
         .gumroad-user-meta-table thead th {
