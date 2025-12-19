@@ -3057,7 +3057,7 @@ class Gumroad_Connect {
         
         /* User Meta Column Styles - Users List Page */
         .column-gumroad_user_meta {
-            width: 180px;
+            width: 330px;
         }
         
         .gumroad-user-meta-details {
