@@ -1347,9 +1347,9 @@ class Gumroad_Connect {
                                                                 </label>
                                                             </div>
                                                             <p class="description" style="margin-top: 8px;">
-                                                                ⏰ Enable membership tracking with automatic role removal after expiry + 7 day grace period.<br>
-                                                                💡 If not selected, roles will be assigned permanently (one-time purchase).<br>
-                                                                🔄 Gumroad handles recurring payments - we only manage membership access based on payment timing.
+                                                                Enable membership tracking with automatic role removal after expiry + 7 day grace period.<br>
+                                                                If not selected, roles will be assigned permanently (one-time purchase).<br>
+                                                                Gumroad handles recurring payments - we only manage membership access based on payment timing.
                                                             </p>
                                                         </div>
                                                     </div>
