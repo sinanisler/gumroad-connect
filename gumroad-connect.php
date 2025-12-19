@@ -26,7 +26,6 @@ class Gumroad_Connect {
     private $user_log_option = 'gumroad_connect_user_log';
     private $products_option = 'gumroad_connect_products';
     private $failed_webhooks_option = 'gumroad_connect_failed_webhooks';
-    private $processed_sales_option = 'gumroad_connect_processed_sales';
     private $subscription_log_option = 'gumroad_connect_subscription_log';
     
     public function __construct() {
@@ -292,19 +291,6 @@ class Gumroad_Connect {
             ), 400);
         }
         
-        // Idempotency check - prevent duplicate processing of same sale_id
-        $sale_id = isset($params['sale_id']) ? $params['sale_id'] : '';
-        if (!empty($sale_id)) {
-            if ($this->is_sale_already_processed($sale_id)) {
-                return new WP_REST_Response(array(
-                    'success' => true,
-                    'message' => 'Sale already processed (idempotency check)',
-                    'sale_id' => $sale_id,
-                    'duplicate' => true,
-                ), 200);
-            }
-        }
-        
         // Verify seller_id if configured
         $seller_id_match = false;
         if (!empty($stored_seller_id) && isset($params['seller_id'])) {
@@ -364,11 +350,6 @@ class Gumroad_Connect {
                         'product_id' => $short_product_id,
                     );
                 }
-            }
-            
-            // Mark sale as processed if successful
-            if ($user_creation_result && !empty($sale_id)) {
-                $this->mark_sale_as_processed($sale_id, $params);
             }
         } else if (!$seller_id_match && !empty($stored_seller_id)) {
             $this->log_failed_webhook($params, 'Seller ID mismatch');
@@ -1066,35 +1047,6 @@ class Gumroad_Connect {
             $headers[$key] = is_array($value) ? implode(', ', $value) : $value;
         }
         return $headers;
-    }
-    
-    /**
-     * Check if sale has already been processed (idempotency)
-     */
-    private function is_sale_already_processed($sale_id) {
-        $processed_sales = get_option($this->processed_sales_option, array());
-        return isset($processed_sales[$sale_id]);
-    }
-    
-    /**
-     * Mark sale as processed
-     */
-    private function mark_sale_as_processed($sale_id, $params) {
-        $processed_sales = get_option($this->processed_sales_option, array());
-        
-        // Store sale ID with timestamp and email for reference
-        $processed_sales[$sale_id] = array(
-            'processed_at' => current_time('mysql'),
-            'email' => isset($params['email']) ? $params['email'] : '',
-            'product' => isset($params['product_name']) ? $params['product_name'] : '',
-        );
-        
-        // Keep only last 1000 processed sales to prevent database bloat
-        if (count($processed_sales) > 1000) {
-            $processed_sales = array_slice($processed_sales, -1000, 1000, true);
-        }
-        
-        update_option($this->processed_sales_option, $processed_sales);
     }
     
     /**
