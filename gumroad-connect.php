@@ -49,6 +49,10 @@ class Gumroad_Connect {
         
         // Membership expiry cron
         add_action('gumroad_connect_check_memberships', array($this, 'check_membership_expiry'));
+        
+        // Add custom column to users list table
+        add_filter('manage_users_columns', array($this, 'add_user_meta_column'));
+        add_filter('manage_users_custom_column', array($this, 'show_user_meta_column_content'), 10, 3);
     }
     
     /**
@@ -2383,11 +2387,117 @@ class Gumroad_Connect {
      * Enqueue admin styles
      */
     public function enqueue_admin_styles($hook) {
-        if (strpos($hook, 'gumroad-connect') === false) {
+        if (strpos($hook, 'gumroad-connect') === false && $hook !== 'users.php') {
             return;
         }
         
         wp_add_inline_style('wp-admin', $this->get_admin_css());
+    }
+    
+    /**
+     * Add User Meta column to users list table
+     */
+    public function add_user_meta_column($columns) {
+        $columns['gumroad_user_meta'] = 'User Meta';
+        return $columns;
+    }
+    
+    /**
+     * Show User Meta column content
+     */
+    public function show_user_meta_column_content($value, $column_name, $user_id) {
+        if ($column_name !== 'gumroad_user_meta') {
+            return $value;
+        }
+        
+        // Get ALL user meta for this user
+        global $wpdb;
+        $user_meta = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d ORDER BY meta_key ASC",
+                $user_id
+            ),
+            ARRAY_A
+        );
+        
+        if (empty($user_meta)) {
+            return '<span style="color: #999;">No meta data</span>';
+        }
+        
+        // Generate a unique ID for this user's collapsible section
+        $collapse_id = 'user-meta-' . $user_id;
+        
+        // Count total meta entries
+        $meta_count = count($user_meta);
+        
+        // Build the collapsible content
+        $output = '<details class="gumroad-user-meta-details">';
+        $output .= '<summary class="gumroad-user-meta-summary">';
+        $output .= '<strong>📋 View ' . $meta_count . ' Meta ' . ($meta_count === 1 ? 'Field' : 'Fields') . '</strong>';
+        $output .= '</summary>';
+        $output .= '<div class="gumroad-user-meta-content">';
+        $output .= '<table class="gumroad-user-meta-table">';
+        $output .= '<thead><tr><th style="width: 35%;">Meta Key</th><th>Meta Value</th></tr></thead>';
+        $output .= '<tbody>';
+        
+        foreach ($user_meta as $meta) {
+            $meta_key = esc_html($meta['meta_key']);
+            $meta_value = $meta['meta_value'];
+            
+            // Try to unserialize if it's serialized data
+            $unserialized = @maybe_unserialize($meta_value);
+            if (is_array($unserialized) || is_object($unserialized)) {
+                $meta_value_display = '<pre style="margin: 0; font-size: 11px; max-height: 200px; overflow-y: auto; background: #f6f7f7; padding: 8px; border-radius: 3px;">' . esc_html(print_r($unserialized, true)) . '</pre>';
+            } else {
+                // Truncate very long values and add expand option
+                $value_text = esc_html($meta_value);
+                if (strlen($value_text) > 100) {
+                    $meta_value_display = '<span class="short-value">' . esc_html(substr($value_text, 0, 100)) . '...</span>';
+                    $meta_value_display .= '<span class="full-value" style="display:none;">' . esc_html($value_text) . '</span>';
+                    $meta_value_display .= '<button type="button" class="button-link toggle-value" style="color: #2271b1; text-decoration: underline; margin-left: 5px;">Show More</button>';
+                } else {
+                    $meta_value_display = $value_text;
+                }
+            }
+            
+            // Highlight Gumroad-specific meta keys
+            $row_class = (strpos($meta_key, 'gumroad') !== false) ? ' class="gumroad-meta-highlight"' : '';
+            
+            $output .= '<tr' . $row_class . '>';
+            $output .= '<td><code>' . $meta_key . '</code></td>';
+            $output .= '<td>' . $meta_value_display . '</td>';
+            $output .= '</tr>';
+        }
+        
+        $output .= '</tbody>';
+        $output .= '</table>';
+        $output .= '</div>';
+        $output .= '</details>';
+        
+        // Add inline JavaScript for toggle functionality
+        $output .= '<script>
+        jQuery(document).ready(function($) {
+            $(".toggle-value").off("click").on("click", function(e) {
+                e.preventDefault();
+                var $btn = $(this);
+                var $parent = $btn.parent();
+                var $short = $parent.find(".short-value");
+                var $full = $parent.find(".full-value");
+                
+                if ($short.is(":visible")) {
+                    $short.hide();
+                    $full.show();
+                    $btn.text("Show Less");
+                } else {
+                    $short.show();
+                    $full.hide();
+                    $btn.text("Show More");
+                }
+            });
+        });
+        </script>';
+        
+        return $output;
     }
     
     /**
@@ -2943,6 +3053,128 @@ class Gumroad_Connect {
             background: #a00;
             border-color: #a00;
             color: white;
+        }
+        
+        /* User Meta Column Styles - Users List Page */
+        .column-gumroad_user_meta {
+            width: 180px;
+        }
+        
+        .gumroad-user-meta-details {
+            margin: 0;
+            padding: 0;
+        }
+        
+        .gumroad-user-meta-summary {
+            cursor: pointer;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #2271b1 0%, #1a5a8f 100%);
+            color: white;
+            border-radius: 4px;
+            list-style: none;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .gumroad-user-meta-summary::-webkit-details-marker {
+            display: none;
+        }
+        
+        .gumroad-user-meta-summary:hover {
+            background: linear-gradient(135deg, #1a5a8f 0%, #134567 100%);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+        }
+        
+        .gumroad-user-meta-summary::before {
+            content: "▶ ";
+            display: inline-block;
+            margin-right: 5px;
+            transition: transform 0.2s ease;
+        }
+        
+        .gumroad-user-meta-details[open] .gumroad-user-meta-summary::before {
+            transform: rotate(90deg);
+        }
+        
+        .gumroad-user-meta-content {
+            margin-top: 10px;
+            background: #fff;
+            border: 2px solid #2271b1;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 500px;
+            overflow-y: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .gumroad-user-meta-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        
+        .gumroad-user-meta-table thead {
+            position: sticky;
+            top: 0;
+            background: #2271b1;
+            color: white;
+            z-index: 1;
+        }
+        
+        .gumroad-user-meta-table thead th {
+            padding: 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #fff;
+        }
+        
+        .gumroad-user-meta-table tbody tr {
+            border-bottom: 1px solid #e5e5e5;
+            transition: background-color 0.15s ease;
+        }
+        
+        .gumroad-user-meta-table tbody tr:hover {
+            background-color: #f0f6fc;
+        }
+        
+        .gumroad-user-meta-table tbody tr.gumroad-meta-highlight {
+            background-color: #fff8e5;
+        }
+        
+        .gumroad-user-meta-table tbody tr.gumroad-meta-highlight:hover {
+            background-color: #fff3cc;
+        }
+        
+        .gumroad-user-meta-table td {
+            padding: 8px;
+            vertical-align: top;
+            word-break: break-word;
+        }
+        
+        .gumroad-user-meta-table td code {
+            background: #f6f7f7;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #d63638;
+            font-weight: 600;
+        }
+        
+        .gumroad-user-meta-table tr.gumroad-meta-highlight td code {
+            background: #2271b1;
+            color: white;
+        }
+        
+        .gumroad-user-meta-table .button-link {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            font-size: 11px;
+        }
+        
+        .gumroad-user-meta-table .button-link:hover {
+            text-decoration: none;
         }
         ';
     }
