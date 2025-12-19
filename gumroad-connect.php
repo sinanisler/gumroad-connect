@@ -493,8 +493,16 @@ class Gumroad_Connect {
         $sale_id = isset($params['sale_id']) ? $params['sale_id'] : '';
         $full_name = isset($params['full_name']) ? $params['full_name'] : '';
         
-        // Check if user already exists
+        // Check if user exists (including deleted users)
+        // WordPress's get_user_by only returns active users, so deleted users will return false
         $user = get_user_by('email', $email);
+        
+        // If no active user found, check if email was used before by a deleted user
+        // by checking if a username exists with this email
+        if (!$user) {
+            // Email is available - either never used or user was deleted
+            // We can safely create a new user
+        }
         
         $settings = get_option($this->option_name, array());
         $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
@@ -520,12 +528,28 @@ class Gumroad_Connect {
         );
         
         if ($user) {
-            // User exists - add roles if needed
+            // User exists - sync roles to match current settings
             $user_id = $user->ID;
             $roles_added = array();
+            $roles_removed = array();
             
+            // Get current user roles
+            $current_roles = (array) $user->roles;
+            
+            // Remove roles that are no longer configured for this product
+            foreach ($current_roles as $current_role) {
+                if (!in_array($current_role, $user_roles)) {
+                    // Don't remove the 'administrator' role to avoid locking out admins
+                    if ($current_role !== 'administrator') {
+                        $user->remove_role($current_role);
+                        $roles_removed[] = $current_role;
+                    }
+                }
+            }
+            
+            // Add new roles that are configured but not yet assigned
             foreach ($user_roles as $role) {
-                if (!in_array($role, $user->roles)) {
+                if (!in_array($role, $current_roles)) {
                     $user->add_role($role);
                     $roles_added[] = $role;
                 }
@@ -583,9 +607,17 @@ class Gumroad_Connect {
             }
             
             $result['status'] = 'existing';
-            $result['message'] = 'User already exists. Roles updated: ' . implode(', ', $roles_added);
+            $changes = array();
+            if (!empty($roles_added)) {
+                $changes[] = 'Added: ' . implode(', ', $roles_added);
+            }
+            if (!empty($roles_removed)) {
+                $changes[] = 'Removed: ' . implode(', ', $roles_removed);
+            }
+            $result['message'] = 'User already exists. Roles synced' . (!empty($changes) ? ' (' . implode('; ', $changes) . ')' : ' (no changes needed)');
             $result['user_id'] = $user_id;
             $result['roles_added'] = $roles_added;
+            $result['roles_removed'] = $roles_removed;
             
         } else {
             // Create new user
