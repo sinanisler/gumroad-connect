@@ -207,8 +207,8 @@ class Gumroad_Connect {
         }
         
         if (isset($input['email_message'])) {
-            // Allow full HTML - strip slashes to prevent accumulation on each save
-            $sanitized['email_message'] = wp_unslash($input['email_message']);
+            // Sanitize HTML to allow only safe HTML tags and prevent XSS
+            $sanitized['email_message'] = wp_kses_post(wp_unslash($input['email_message']));
         }
         
         // Always set product_roles, even if empty
@@ -423,9 +423,14 @@ class Gumroad_Connect {
             $roles_to_remove = isset($settings['user_roles']) ? $settings['user_roles'] : array('subscriber');
         }
         
-        // Remove roles from user
-        $roles_removed = array();
-        foreach ($roles_to_remove as $role) {
+// Remove roles from user (exclude administrator to prevent accidental lockout)
+            $roles_removed = array();
+            $protected_roles = array('administrator', 'super_admin');
+            foreach ($roles_to_remove as $role) {
+                // Skip protected roles for safety
+                if (in_array($role, $protected_roles)) {
+                    continue;
+                }
             if (in_array($role, $user->roles)) {
                 $user->remove_role($role);
                 $roles_removed[] = $role;
@@ -525,11 +530,14 @@ class Gumroad_Connect {
             // Get current user roles
             $current_roles = (array) $user->roles;
             
+            // Define protected roles that should never be modified via webhooks
+            $protected_roles = array('administrator', 'super_admin');
+            
             // Remove roles that are no longer configured for this product
             foreach ($current_roles as $current_role) {
                 if (!in_array($current_role, $user_roles)) {
-                    // Don't remove the 'administrator' role to avoid locking out admins
-                    if ($current_role !== 'administrator') {
+                    // Don't remove protected roles to prevent privilege issues
+                    if (!in_array($current_role, $protected_roles)) {
                         $user->remove_role($current_role);
                         $roles_removed[] = $current_role;
                     }
@@ -537,7 +545,12 @@ class Gumroad_Connect {
             }
             
             // Add new roles that are configured but not yet assigned
+            // Exclude protected roles from being assigned via webhooks
             foreach ($user_roles as $role) {
+                // Skip protected roles to prevent privilege escalation
+                if (in_array($role, $protected_roles)) {
+                    continue;
+                }
                 if (!in_array($role, $current_roles)) {
                     $user->add_role($role);
                     $roles_added[] = $role;
@@ -636,9 +649,14 @@ class Gumroad_Connect {
                 $result['status'] = 'error';
                 $result['message'] = $user_id->get_error_message();
             } else {
-                // Add custom roles
+                // Add custom roles (exclude protected roles to prevent privilege escalation)
                 $user = new WP_User($user_id);
+                $protected_roles = array('administrator', 'super_admin');
                 foreach ($user_roles as $role) {
+                    // Skip protected roles to prevent privilege escalation via forged webhooks
+                    if (in_array($role, $protected_roles)) {
+                        continue;
+                    }
                     $user->add_role($role);
                 }
                 
