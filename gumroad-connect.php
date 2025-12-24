@@ -90,8 +90,16 @@ class Gumroad_Connect {
      * Uses SHA-256 instead of MD5 for cryptographic security
      */
     private function generate_endpoint_hash() {
-        // Use cryptographically secure random bytes
-        $random_bytes = function_exists('random_bytes') ? bin2hex(random_bytes(32)) : wp_generate_password(64, true, true);
+        // Use cryptographically secure random bytes with fallback
+        if (function_exists('random_bytes')) {
+            $random_bytes = bin2hex(random_bytes(32));
+        } elseif (function_exists('openssl_random_pseudo_bytes')) {
+            $random_bytes = bin2hex(openssl_random_pseudo_bytes(32));
+        } else {
+            // Last resort fallback for very old systems
+            $random_bytes = wp_generate_password(64, true, true);
+        }
+        
         $domain = get_site_url();
         // Use SHA-256 HMAC with WordPress salt for additional security
         $hash = hash_hmac('sha256', $domain . $random_bytes . time(), wp_salt('secure_auth'));
@@ -544,7 +552,13 @@ class Gumroad_Connect {
             
             // Remove roles that are no longer configured for this product
             // Define protected roles that should never be removed automatically
-            $protected_roles = array('administrator', 'super_admin', 'editor', 'shop_manager');
+            // TODO: Consider making this configurable in future version
+            $protected_roles = apply_filters('gumroad_connect_protected_roles', array(
+                'administrator', 
+                'super_admin', 
+                'editor', 
+                'shop_manager'
+            ));
             
             foreach ($current_roles as $current_role) {
                 if (!in_array($current_role, $user_roles)) {
@@ -2669,10 +2683,10 @@ class Gumroad_Connect {
             return '<span style="color: #999;">Invalid user</span>';
         }
         
-        $table_name = $wpdb->usermeta;
+        // Use $wpdb->usermeta directly to prevent any table name manipulation
         $user_meta = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM {$table_name} WHERE user_id = %d ORDER BY meta_key ASC",
+                "SELECT meta_key, meta_value FROM {$wpdb->usermeta} WHERE user_id = %d ORDER BY meta_key ASC",
                 $user_id
             ),
             ARRAY_A
@@ -3449,10 +3463,10 @@ class Gumroad_Connect {
             return;
         }
         
-        $table_name = $wpdb->usermeta;
+        // Use $wpdb->usermeta directly to prevent any table name manipulation
         $gumroad_meta = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM {$table_name} WHERE user_id = %d AND meta_key LIKE %s ORDER BY meta_key ASC",
+                "SELECT meta_key, meta_value FROM {$wpdb->usermeta} WHERE user_id = %d AND meta_key LIKE %s ORDER BY meta_key ASC",
                 $user_id,
                 $wpdb->esc_like('gumroad') . '%'
             ),
