@@ -87,11 +87,14 @@ class Gumroad_Connect {
     
     /**
      * Generate unique endpoint hash based on domain
+     * Uses SHA-256 instead of MD5 for cryptographic security
      */
     private function generate_endpoint_hash() {
+        // Use cryptographically secure random bytes
+        $random_bytes = function_exists('random_bytes') ? bin2hex(random_bytes(32)) : wp_generate_password(64, true, true);
         $domain = get_site_url();
-        $salt = wp_generate_password(32, true, true);
-        $hash = substr(md5($domain . $salt . time()), 0, 16);
+        // Use SHA-256 HMAC with WordPress salt for additional security
+        $hash = hash_hmac('sha256', $domain . $random_bytes . time(), wp_salt('secure_auth'));
         update_option('gumroad_connect_endpoint_hash', $hash);
         return $hash;
     }
@@ -290,12 +293,15 @@ class Gumroad_Connect {
         $create_users = isset($settings['create_users']) ? $settings['create_users'] : true;
         
         // Validate resource_name to ensure this is a sale event
-        $resource_name = isset($params['resource_name']) ? $params['resource_name'] : '';
+        $resource_name = isset($params['resource_name']) ? sanitize_text_field($params['resource_name']) : '';
         if (!empty($resource_name) && $resource_name !== 'sale') {
-            $this->log_failed_webhook($params, 'Invalid resource type: ' . $resource_name);
+            // Log detailed error internally
+            error_log('Gumroad Connect: Invalid resource type received: ' . $resource_name);
+            $this->log_failed_webhook($params, 'Invalid resource type');
+            // Return generic error externally
             return new WP_REST_Response(array(
                 'success' => false,
-                'message' => 'Invalid resource type',
+                'message' => 'Invalid request',
             ), 400);
         }
         
@@ -378,9 +384,20 @@ class Gumroad_Connect {
      */
     private function handle_subscription_cancellation($params) {
         $email = sanitize_email($params['email']);
-        $subscription_id = isset($params['subscription_id']) ? $params['subscription_id'] : '';
-        $product_name = isset($params['product_name']) ? $params['product_name'] : 'Product';
-        $short_product_id = isset($params['short_product_id']) ? $params['short_product_id'] : '';
+        $subscription_id = isset($params['subscription_id']) ? sanitize_text_field($params['subscription_id']) : '';
+        $product_name = isset($params['product_name']) ? sanitize_text_field($params['product_name']) : 'Product';
+        $short_product_id = isset($params['short_product_id']) ? sanitize_text_field($params['short_product_id']) : '';
+        
+        // Validate subscription ID format (alphanumeric, dash, underscore only)
+        if (!empty($subscription_id) && !preg_match('/^[a-zA-Z0-9_-]+$/', $subscription_id)) {
+            return array(
+                'status' => 'error',
+                'message' => 'Invalid subscription ID format',
+                'user_id' => 0,
+                'email' => $email,
+                'action' => 'cancellation',
+            );
+        }
         
         $result = array(
             'status' => 'error',
@@ -526,10 +543,13 @@ class Gumroad_Connect {
             $current_roles = (array) $user->roles;
             
             // Remove roles that are no longer configured for this product
+            // Define protected roles that should never be removed automatically
+            $protected_roles = array('administrator', 'super_admin', 'editor', 'shop_manager');
+            
             foreach ($current_roles as $current_role) {
                 if (!in_array($current_role, $user_roles)) {
-                    // Don't remove the 'administrator' role to avoid locking out admins
-                    if ($current_role !== 'administrator') {
+                    // Don't remove protected roles to avoid locking out important users
+                    if (!in_array($current_role, $protected_roles)) {
                         $user->remove_role($current_role);
                         $roles_removed[] = $current_role;
                     }
@@ -611,7 +631,8 @@ class Gumroad_Connect {
         } else {
             // Create new user
             $username = $this->generate_username($email, $full_name);
-            $password = wp_generate_password(12, true, false);
+            // Generate strong password with special characters (16 characters minimum)
+            $password = wp_generate_password(16, true, true);
             
             $user_data = array(
                 'user_login' => $username,
@@ -620,9 +641,10 @@ class Gumroad_Connect {
                 'role' => 'subscriber', // Default role
             );
             
-            // Add full name if available
+            // Add full name if available (with sanitization)
             if (!empty($full_name)) {
-                $name_parts = explode(' ', $full_name, 2);
+                $full_name = sanitize_text_field($full_name);
+                $name_parts = array_map('sanitize_text_field', explode(' ', $full_name, 2));
                 $user_data['first_name'] = $name_parts[0];
                 if (isset($name_parts[1])) {
                     $user_data['last_name'] = $name_parts[1];
@@ -816,26 +838,24 @@ class Gumroad_Connect {
         }
         
         // ============================================
-        // 3. CUSTOMER CONTEXT
+        // 3. CUSTOMER CONTEXT (NO SENSITIVE DATA)
         // ============================================
         
         // Store customer info from Gumroad (first time or update)
         if (isset($params['purchaser_id'])) {
-            update_user_meta($user_id, 'gumroad_purchaser_id', $params['purchaser_id']);
+            update_user_meta($user_id, 'gumroad_purchaser_id', sanitize_text_field($params['purchaser_id']));
         }
         
         if (isset($params['ip_country']) && !empty($params['ip_country'])) {
-            update_user_meta($user_id, 'gumroad_country', $params['ip_country']);
+            update_user_meta($user_id, 'gumroad_country', sanitize_text_field($params['ip_country']));
         }
         
-        // Card info (last 4 digits for reference)
+        // SECURITY: Do NOT store card information to comply with PCI-DSS
+        // Only store a reference that payment was processed via Gumroad
         if (isset($params['card']) && is_array($params['card'])) {
-            $card_info = array(
-                'type' => isset($params['card']['visual']) ? $params['card']['visual'] : '',
-                'last4' => isset($params['card']['last_four']) ? $params['card']['last_four'] : '',
-                'expiry' => isset($params['card']['expiry_month']) && isset($params['card']['expiry_year']) ? $params['card']['expiry_month'] . '/' . $params['card']['expiry_year'] : '',
-            );
-            update_user_meta($user_id, 'gumroad_card_info', $card_info);
+            update_user_meta($user_id, 'gumroad_payment_method', 'card');
+            // Timestamp when we last saw a card payment
+            update_user_meta($user_id, 'gumroad_last_card_payment', current_time('mysql'));
         }
         
         // ============================================
@@ -2481,12 +2501,20 @@ class Gumroad_Connect {
             echo '<div class="notice notice-success"><p>Failed webhooks log cleared successfully!</p></div>';
         }
         
-        // Handle retry action
+        // Handle retry action with proper authorization check
         if (isset($_POST['retry_webhook']) && isset($_POST['webhook_index']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_retry_webhook')) {
+            // Verify user has proper permissions
+            if (!current_user_can('manage_options')) {
+                wp_die(__('You do not have sufficient permissions to access this page.'));
+            }
+            
             $webhook_index = intval($_POST['webhook_index']);
             $failed_log = get_option($this->failed_webhooks_option, array());
             
-            if (isset($failed_log[$webhook_index])) {
+            // Validate webhook index exists
+            if (!isset($failed_log[$webhook_index]) || $webhook_index < 0 || $webhook_index >= count($failed_log)) {
+                echo '<div class="notice notice-error"><p>❌ Invalid webhook index.</p></div>';
+            } else {
                 $webhook_data = $failed_log[$webhook_index]['data'];
                 
                 // Create a mock request object
@@ -2503,7 +2531,8 @@ class Gumroad_Connect {
                     update_option($this->failed_webhooks_option, $failed_log);
                     echo '<div class="notice notice-success"><p>✅ Webhook retried successfully!</p></div>';
                 } else {
-                    echo '<div class="notice notice-error"><p>❌ Webhook retry failed: ' . esc_html($result->get_data()['message']) . '</p></div>';
+                    $error_message = isset($result->get_data()['message']) ? esc_html($result->get_data()['message']) : 'Unknown error';
+                    echo '<div class="notice notice-error"><p>❌ Webhook retry failed: ' . $error_message . '</p></div>';
                 }
             }
         }
@@ -2634,9 +2663,16 @@ class Gumroad_Connect {
         
         // Get ALL user meta for this user
         global $wpdb;
+        // Validate user ID is numeric to prevent SQL injection
+        $user_id = absint($user_id);
+        if ($user_id <= 0) {
+            return '<span style="color: #999;">Invalid user</span>';
+        }
+        
+        $table_name = $wpdb->usermeta;
         $user_meta = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d ORDER BY meta_key ASC",
+                "SELECT meta_key, meta_value FROM {$table_name} WHERE user_id = %d ORDER BY meta_key ASC",
                 $user_id
             ),
             ARRAY_A
@@ -3406,11 +3442,19 @@ class Gumroad_Connect {
     public function display_gumroad_debug_metabox($user) {
         // Get Gumroad-specific meta only
         global $wpdb;
+        // Validate user ID
+        $user_id = absint($user->ID);
+        if ($user_id <= 0) {
+            echo '<p>Invalid user ID.</p>';
+            return;
+        }
+        
+        $table_name = $wpdb->usermeta;
         $gumroad_meta = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT meta_key, meta_value FROM $wpdb->usermeta WHERE user_id = %d AND meta_key LIKE %s ORDER BY meta_key ASC",
-                $user->ID,
-                'gumroad%'
+                "SELECT meta_key, meta_value FROM {$table_name} WHERE user_id = %d AND meta_key LIKE %s ORDER BY meta_key ASC",
+                $user_id,
+                $wpdb->esc_like('gumroad') . '%'
             ),
             ARRAY_A
         );
