@@ -18,7 +18,6 @@ I can kickstart your membership site easily. 😉
 
 - ✅ **Automatic User Creation** - Creates WordPress users when customers purchase
 - ✅ **Product-Specific Roles** - Assign different roles for different products
-- ✅ **Subscription Support** - Handles recurring payments and cancellations
 - ✅ **Custom Email Templates** - Full HTML support with dynamic tags
 - ✅ **Secure Endpoints** - Unique hash-based webhook URLs
 - ✅ **Comprehensive Logging** - Configurable storage limits (10-1000 entries)
