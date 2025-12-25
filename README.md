@@ -14,6 +14,8 @@ On github I only give bug fix support on [issues](https://github.com/sinanisler/
 If you need paid setup  or training help contact me:  sinan@sinanisler.com
 I can kickstart your membership site easily. 😉
 
+> NOTE: This plugin only works with PING/Webhook methodology so I would recommend using this plugin only if you have simple product types. ıf you will sell recurring products or monthl or yearly complex products use my other [Gumroad API](https://github.com/sinanisler/gumroad-api) plugin.
+
 ## Features
 
 - ✅ **Automatic User Creation** - Creates WordPress users when customers purchase
