@@ -72,6 +72,9 @@ class Gumroad_Connect {
         if (!wp_next_scheduled('gumroad_connect_check_memberships')) {
             wp_schedule_event(time(), 'daily', 'gumroad_connect_check_memberships');
         }
+        
+        // Flush rewrite rules to register REST API routes
+        flush_rewrite_rules();
     }
     
     /**
@@ -270,7 +273,7 @@ class Gumroad_Connect {
     public function register_rest_route() {
         $endpoint_hash = $this->get_endpoint_hash();
         
-        register_rest_route('gumroad-connect/v1', '/ping/' . $endpoint_hash, array(
+        register_rest_route('gumroad-connect/v1', 'ping/' . $endpoint_hash, array(
             'methods' => 'POST',
             'callback' => array($this, 'handle_ping'),
             'permission_callback' => '__return_true', // Public endpoint
