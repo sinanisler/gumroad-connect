@@ -3,7 +3,7 @@
  * Plugin Name: Gumroad Connect
  * Plugin URI: https://github.com/sinanisler/gumroad-connect
  * Description: Connect your WordPress site with Gumroad to automatically create user accounts when customers make a purchase.
- * Version: 1.29
+ * Version: 1.30
  * Author: sinanisler
  * Author URI: https://sinanisler.com
  * License: GPL v2 or later
@@ -135,29 +135,11 @@ class Gumroad_Connect {
         
         add_submenu_page(
             'gumroad-connect',
-            'Ping Test',
-            'Ping Test',
+            'Webhook Logs',
+            'Webhook Logs',
             'manage_options',
-            'gumroad-connect-test',
-            array($this, 'test_page')
-        );
-        
-        add_submenu_page(
-            'gumroad-connect',
-            'User Log',
-            'User Log',
-            'manage_options',
-            'gumroad-connect-users',
-            array($this, 'user_log_page')
-        );
-        
-        add_submenu_page(
-            'gumroad-connect',
-            'Subscription Log',
-            'Subscription Log',
-            'manage_options',
-            'gumroad-connect-subscriptions',
-            array($this, 'subscription_log_page')
+            'gumroad-connect-logs',
+            array($this, 'webhook_logs_page')
         );
         
         add_submenu_page(
@@ -1787,7 +1769,7 @@ class Gumroad_Connect {
                             <li>Go to your <a href="https://app.gumroad.com/settings" target="_blank">Gumroad Account Settings</a></li>
                             <li>Find the <strong>"Ping"</strong> setting</li>
                             <li>Paste the endpoint URL</li>
-                            <li>Test the connection using the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-test'); ?>">Ping Test</a> page</li>
+                            <li>Test the connection using the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-logs'); ?>">Webhook Logs</a> page</li>
                         </ol>
                     </div>
                         </div>
@@ -1806,7 +1788,7 @@ class Gumroad_Connect {
                                 <li>The user is assigned the roles you selected (e.g., "Paid Member" + "Subscriber")</li>
                                 <li>An email is automatically sent with their login credentials</li>
                                 <li>If the user already exists, the roles are simply added to their account</li>
-                                <li>All actions are logged in the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-users'); ?>">User Log</a></li>
+                                <li>All actions are logged in the <a href="<?php echo admin_url('admin.php?page=gumroad-connect-logs'); ?>">Webhook Logs</a></li>
                             </ul>
                         </div>
                     </details>
@@ -1837,11 +1819,11 @@ class Gumroad_Connect {
     }
     
     /**
-     * Test page
+     * Unified Webhook Logs page - combines Ping Test, User Log, and Subscription Log
      */
-    public function test_page() {
+    public function webhook_logs_page() {
         // Handle settings update
-        if (isset($_POST['update_ping_settings']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_ping_settings')) {
+        if (isset($_POST['update_log_settings']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_log_settings')) {
             $settings = get_option($this->option_name, array());
             
             if (isset($_POST[$this->option_name]['ping_log_limit'])) {
@@ -1855,13 +1837,15 @@ class Gumroad_Connect {
             }
             
             update_option($this->option_name, $settings);
-            echo '<div class="notice notice-success"><p>Ping log settings saved successfully!</p></div>';
+            echo '<div class="notice notice-success"><p>✅ Log settings saved successfully!</p></div>';
         }
         
         // Handle clear log action
-        if (isset($_POST['clear_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_log')) {
+        if (isset($_POST['clear_all_logs']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_all_logs')) {
             delete_option($this->ping_log_option);
-            echo '<div class="notice notice-success"><p>Ping log cleared successfully!</p></div>';
+            delete_option($this->user_log_option);
+            delete_option($this->subscription_log_option);
+            echo '<div class="notice notice-success"><p>✅ All logs cleared successfully!</p></div>';
         }
         
         $ping_log = get_option($this->ping_log_option, array());
@@ -1881,15 +1865,15 @@ class Gumroad_Connect {
         
         ?>
         <div class="wrap gumroad-connect-wrap">
-            <h1>🧪 Gumroad Connect - Ping Test</h1>
+            <h1>📡 Gumroad Connect - Webhook Logs</h1>
             
             <div class="gumroad-connect-container">
                 
-                <!-- Ping Log Settings -->
+                <!-- Log Settings -->
                 <div class="gumroad-card">
-                    <h2>⚙️ Ping Log Settings</h2>
+                    <h2>⚙️ Log Settings</h2>
                     <form method="post" action="">
-                        <?php wp_nonce_field('gumroad_ping_settings'); ?>
+                        <?php wp_nonce_field('gumroad_log_settings'); ?>
                         
                         <table class="form-table">
                             <tr>
@@ -1897,9 +1881,6 @@ class Gumroad_Connect {
                                     <label for="ping_log_limit">Storage Limit</label>
                                 </th>
                                 <td>
-                                    <?php 
-                                    $ping_log_limit = isset($settings['ping_log_limit']) ? $settings['ping_log_limit'] : 100;
-                                    ?>
                                     <input 
                                         type="number" 
                                         id="ping_log_limit" 
@@ -1910,7 +1891,7 @@ class Gumroad_Connect {
                                         class="small-text"
                                     />
                                     <p class="description">
-                                        Maximum number of ping entries to store in database. Default: 100. Range: 10-1000.<br>
+                                        Maximum number of webhook entries to store in database. Default: 100. Range: 10-1000.<br>
                                         Older entries are automatically deleted when this limit is exceeded.
                                     </p>
                                 </td>
@@ -1921,9 +1902,6 @@ class Gumroad_Connect {
                                     <label for="ping_per_page">Entries Per Page</label>
                                 </th>
                                 <td>
-                                    <?php 
-                                    $ping_per_page = isset($settings['ping_per_page']) ? $settings['ping_per_page'] : 50;
-                                    ?>
                                     <input 
                                         type="number" 
                                         id="ping_per_page" 
@@ -1934,20 +1912,20 @@ class Gumroad_Connect {
                                         class="small-text"
                                     />
                                     <p class="description">
-                                        Number of ping entries to display per page. Default: 50. Range: 10-200.
+                                        Number of webhook entries to display per page. Default: 50. Range: 10-200.
                                     </p>
                                 </td>
                             </tr>
                         </table>
                         
-                        <button type="submit" name="update_ping_settings" class="button button-primary">Save Settings</button>
+                        <button type="submit" name="update_log_settings" class="button button-primary">Save Settings</button>
                     </form>
                 </div>
                 
                 <!-- Test Instructions -->
                 <div class="gumroad-card">
-                    <h2>📡 Test Your Connection</h2>
-                    <p>This page displays incoming webhook pings from Gumroad in real-time.</p>
+                    <h2>📬 Webhook Activity Monitor</h2>
+                    <p>This page displays all incoming webhook activity from Gumroad, including ping verification, user creation, and subscription events.</p>
                     
                     <div class="test-instructions">
                         <h3>How to test:</h3>
@@ -1955,7 +1933,7 @@ class Gumroad_Connect {
                             <li>Make sure you've saved your Seller ID in <a href="<?php echo admin_url('admin.php?page=gumroad-connect'); ?>">Settings</a></li>
                             <li>Add the webhook URL to your Gumroad account</li>
                             <li>Make a test purchase of your own product (or use Gumroad's test mode)</li>
-                            <li>Refresh this page to see the incoming ping data</li>
+                            <li>Refresh this page to see the incoming webhook data</li>
                         </ol>
                         
                         <p><strong>Configured Seller ID:</strong> 
@@ -1969,9 +1947,9 @@ class Gumroad_Connect {
                     
                     <div style="margin-top: 20px;">
                         <form method="post" style="display: inline;">
-                            <?php wp_nonce_field('gumroad_clear_log'); ?>
-                            <button type="submit" name="clear_log" class="button" onclick="return confirm('Are you sure you want to clear all ping logs?')">
-                                🗑️ Clear Ping Log
+                            <?php wp_nonce_field('gumroad_clear_all_logs'); ?>
+                            <button type="submit" name="clear_all_logs" class="button" onclick="return confirm('Are you sure you want to clear all webhook logs?')">
+                                🗑️ Clear All Logs
                             </button>
                         </form>
                         <button type="button" class="button button-primary" onclick="location.reload()">
@@ -1980,9 +1958,9 @@ class Gumroad_Connect {
                     </div>
                 </div>
                 
-                <!-- Ping Log -->
+                <!-- Webhook Logs -->
                 <div class="gumroad-card">
-                    <h2>📬 Received Pings (Storing Last <?php echo $ping_log_limit; ?>)</h2>
+                    <h2>📋 Webhook Logs (Storing Last <?php echo $ping_log_limit; ?>)</h2>
                     
                     <?php if ($total_entries > 0): ?>
                         <div class="log-stats">
@@ -1992,25 +1970,104 @@ class Gumroad_Connect {
                     
                     <?php if (empty($ping_log)): ?>
                         <div class="no-pings">
-                            <p>🔍 No pings received yet.</p>
+                            <p>🔍 No webhooks received yet.</p>
                             <p>Make a test purchase or wait for a real sale to see data here.</p>
                         </div>
                     <?php else: ?>
                         <?php foreach ($paged_log as $index => $entry): ?>
+                            <?php
+                            // Determine entry type and status
+                            $entry_data = $entry['data'];
+                            $is_subscription = isset($entry_data['subscription_id']) && !empty($entry_data['subscription_id']);
+                            $is_refunded = isset($entry_data['refunded']) && $entry_data['refunded'] === 'true';
+                            $is_cancelled = isset($entry_data['cancelled']) && $entry_data['cancelled'] === 'true';
+                            $is_test = isset($entry_data['test']) && $entry_data['test'] === 'true';
+                            
+                            // Determine badge
+                            $badge_class = '';
+                            $badge_text = '';
+                            $entry_icon = '📦';
+                            
+                            if ($entry['seller_id_match']) {
+                                $badge_class = 'badge-success';
+                                $badge_text = '✅ Verified';
+                            } else {
+                                $badge_class = 'badge-warning';
+                                $badge_text = '⚠️ Seller ID Mismatch';
+                            }
+                            
+                            if ($is_subscription) {
+                                $entry_icon = '🔄';
+                            }
+                            if ($is_refunded || $is_cancelled) {
+                                $entry_icon = '🚫';
+                            }
+                            if ($is_test) {
+                                $entry_icon = '🧪';
+                            }
+                            ?>
+                            
                             <div class="ping-entry <?php echo $entry['seller_id_match'] ? 'verified' : 'unverified'; ?>">
                                 <div class="ping-header">
-                                    <strong>Ping #<?php echo ($offset + $index + 1); ?></strong>
+                                    <strong><?php echo $entry_icon; ?> Webhook #<?php echo ($offset + $index + 1); ?></strong>
                                     <span class="ping-time"><?php echo esc_html($entry['datetime_readable']); ?></span>
-                                    <?php if ($entry['seller_id_match']): ?>
-                                        <span class="badge badge-success">✅ Verified</span>
-                                    <?php else: ?>
-                                        <span class="badge badge-warning">⚠️ Seller ID Mismatch</span>
+                                    <span class="badge <?php echo $badge_class; ?>"><?php echo $badge_text; ?></span>
+                                    <?php if ($is_test): ?>
+                                        <span class="badge badge-custom">🧪 Test Mode</span>
                                     <?php endif; ?>
+                                    <?php if ($is_subscription): ?>
+                                        <span class="badge badge-custom">🔄 Subscription</span>
+                                    <?php endif; ?>
+                                    <?php if ($is_refunded || $is_cancelled): ?>
+                                        <span class="badge" style="background: #dc3232; color: white;">🚫 Refund/Cancel</span>
+                                    <?php endif; ?>
+                                </div>
+                                
+                                <!-- Quick Summary -->
+                                <div class="quick-info">
+                                    <table>
+                                        <?php if (isset($entry_data['email'])): ?>
+                                            <tr>
+                                                <td><strong>Email:</strong></td>
+                                                <td><?php echo esc_html($entry_data['email']); ?></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if (isset($entry_data['product_name'])): ?>
+                                            <tr>
+                                                <td><strong>Product:</strong></td>
+                                                <td><?php echo esc_html($entry_data['product_name']); ?></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if (isset($entry_data['price'])): ?>
+                                            <tr>
+                                                <td><strong>Price:</strong></td>
+                                                <td>$<?php echo number_format($entry_data['price'] / 100, 2); ?></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if (isset($entry_data['sale_id'])): ?>
+                                            <tr>
+                                                <td><strong>Sale ID:</strong></td>
+                                                <td><code><?php echo esc_html($entry_data['sale_id']); ?></code></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if ($is_subscription && isset($entry_data['subscription_id'])): ?>
+                                            <tr>
+                                                <td><strong>Subscription ID:</strong></td>
+                                                <td><code><?php echo esc_html($entry_data['subscription_id']); ?></code></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                        <?php if (isset($entry_data['recurrence']) && !empty($entry_data['recurrence'])): ?>
+                                            <tr>
+                                                <td><strong>Recurrence:</strong></td>
+                                                <td><?php echo esc_html($entry_data['recurrence']); ?></td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </table>
                                 </div>
                                 
                                 <div class="ping-details">
                                     <details>
-                                        <summary><strong>📦 View Full Data</strong></summary>
+                                        <summary><strong>📦 View Complete Webhook Data</strong></summary>
                                         
                                         <h4>POST Data:</h4>
                                         <pre><?php echo esc_html(json_encode($entry['data'], JSON_PRETTY_PRINT)); ?></pre>
@@ -2025,23 +2082,6 @@ class Gumroad_Connect {
                                         echo "Match: " . ($entry['seller_id_match'] ? 'YES ✅' : 'NO ❌');
                                         ?></pre>
                                     </details>
-                                    
-                                    <!-- Quick Info -->
-                                    <?php if (!empty($entry['data'])): ?>
-                                        <div class="quick-info">
-                                            <h4>Quick Info:</h4>
-                                            <table>
-                                                <?php foreach ($entry['data'] as $key => $value): ?>
-                                                    <?php if (in_array($key, ['sale_id', 'product_name', 'email', 'price', 'seller_id', 'product_id'])): ?>
-                                                        <tr>
-                                                            <td><strong><?php echo esc_html($key); ?>:</strong></td>
-                                                            <td><?php echo esc_html(is_array($value) ? json_encode($value) : $value); ?></td>
-                                                        </tr>
-                                                    <?php endif; ?>
-                                                <?php endforeach; ?>
-                                            </table>
-                                        </div>
-                                    <?php endif; ?>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -2053,7 +2093,7 @@ class Gumroad_Connect {
                                     <span class="displaying-num"><?php echo $total_entries; ?> items</span>
                                     <span class="pagination-links">
                                         <?php
-                                        $base_url = admin_url('admin.php?page=gumroad-connect-test');
+                                        $base_url = admin_url('admin.php?page=gumroad-connect-logs');
                                         
                                         if ($current_page > 1) {
                                             echo '<a class="button" href="' . esc_url($base_url . '&paged=1') . '">« First</a> ';
@@ -2075,415 +2115,6 @@ class Gumroad_Connect {
                                 </div>
                             </div>
                         <?php endif; ?>
-                    <?php endif; ?>
-                </div>
-                
-            </div>
-        </div>
-        <?php
-    }
-    
-    /**
-     * User log page
-     */
-    public function user_log_page() {
-        // Handle settings update
-        if (isset($_POST['update_user_settings']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_user_settings')) {
-            $settings = get_option($this->option_name, array());
-            
-            if (isset($_POST[$this->option_name]['user_log_limit'])) {
-                $user_log_limit = intval($_POST[$this->option_name]['user_log_limit']);
-                $settings['user_log_limit'] = max(10, min(1000, $user_log_limit));
-            }
-            
-            if (isset($_POST[$this->option_name]['user_per_page'])) {
-                $user_per_page = intval($_POST[$this->option_name]['user_per_page']);
-                $settings['user_per_page'] = max(10, min(200, $user_per_page));
-            }
-            
-            update_option($this->option_name, $settings);
-            echo '<div class="notice notice-success"><p>User log settings saved successfully!</p></div>';
-        }
-        
-        // Handle clear log action
-        if (isset($_POST['clear_user_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_user_log')) {
-            delete_option($this->user_log_option);
-            echo '<div class="notice notice-success"><p>User log cleared successfully!</p></div>';
-        }
-        
-        $user_log = get_option($this->user_log_option, array());
-        $settings = get_option($this->option_name, array());
-        
-        // Get log limits from settings
-        $user_log_limit = isset($settings['user_log_limit']) ? intval($settings['user_log_limit']) : 100;
-        $user_per_page = isset($settings['user_per_page']) ? intval($settings['user_per_page']) : 50;
-        
-        // Pagination
-        $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
-        $total_entries = count($user_log);
-        $total_pages = ceil($total_entries / $user_per_page);
-        $offset = ($current_page - 1) * $user_per_page;
-        $paged_log = array_slice($user_log, $offset, $user_per_page);
-        
-        ?>
-        <div class="wrap gumroad-connect-wrap">
-            <h1>👥 Gumroad Connect - User Log</h1>
-            
-            <div class="gumroad-connect-container">
-                
-                <!-- User Log Settings -->
-                <div class="gumroad-card">
-                    <h2>⚙️ User Log Settings</h2>
-                    <form method="post" action="">
-                        <?php wp_nonce_field('gumroad_user_settings'); ?>
-                        
-                        <table class="form-table">
-                            <tr>
-                                <th scope="row">
-                                    <label for="user_log_limit">Storage Limit</label>
-                                </th>
-                                <td>
-                                    <?php 
-                                    $user_log_limit = isset($settings['user_log_limit']) ? $settings['user_log_limit'] : 100;
-                                    ?>
-                                    <input 
-                                        type="number" 
-                                        id="user_log_limit" 
-                                        name="<?php echo esc_attr($this->option_name); ?>[user_log_limit]" 
-                                        value="<?php echo esc_attr($user_log_limit); ?>"
-                                        min="10"
-                                        max="1000"
-                                        class="small-text"
-                                    />
-                                    <p class="description">
-                                        Maximum number of user action entries to store in database. Default: 100. Range: 10-1000.<br>
-                                        Older entries are automatically deleted when this limit is exceeded.
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <tr>
-                                <th scope="row">
-                                    <label for="user_per_page">Entries Per Page</label>
-                                </th>
-                                <td>
-                                    <?php 
-                                    $user_per_page = isset($settings['user_per_page']) ? $settings['user_per_page'] : 50;
-                                    ?>
-                                    <input 
-                                        type="number" 
-                                        id="user_per_page" 
-                                        name="<?php echo esc_attr($this->option_name); ?>[user_per_page]" 
-                                        value="<?php echo esc_attr($user_per_page); ?>"
-                                        min="10"
-                                        max="200"
-                                        class="small-text"
-                                    />
-                                    <p class="description">
-                                        Number of user action entries to display per page. Default: 50. Range: 10-200.
-                                    </p>
-                                </td>
-                            </tr>
-                        </table>
-                        
-                        <button type="submit" name="update_user_settings" class="button button-primary">Save Settings</button>
-                    </form>
-                </div>
-                
-                <!-- User Log Header -->
-                <div class="gumroad-card">
-                    <h2>📊 User Creation Log</h2>
-                    <p>This page shows all users created or updated through Gumroad purchases.</p>
-                    
-                    <div style="margin-top: 20px;">
-                        <form method="post" style="display: inline;">
-                            <?php wp_nonce_field('gumroad_clear_user_log'); ?>
-                            <button type="submit" name="clear_user_log" class="button" onclick="return confirm('Are you sure you want to clear the user log?')">
-                                🗑️ Clear User Log
-                            </button>
-                        </form>
-                        <button type="button" class="button button-primary" onclick="location.reload()">
-                            🔄 Refresh Page
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- User Log Entries -->
-                <div class="gumroad-card">
-                    <h2>👤 User Actions (Storing Last <?php echo $user_log_limit; ?>)</h2>
-                    
-                    <?php if ($total_entries > 0): ?>
-                        <div class="log-stats">
-                            <p>Showing <?php echo count($paged_log); ?> of <?php echo $total_entries; ?> entries (Page <?php echo $current_page; ?> of <?php echo $total_pages; ?>)</p>
-                        </div>
-                    <?php endif; ?>
-                    
-                    <?php if (empty($user_log)): ?>
-                        <div class="no-pings">
-                            <p>🔍 No user actions logged yet.</p>
-                            <p>Users will appear here when they're created through Gumroad purchases.</p>
-                        </div>
-                    <?php else: ?>
-                        <?php foreach ($paged_log as $index => $entry): ?>
-                            <?php 
-                            $result = $entry['result'];
-                            $status = $result['status'];
-                            $status_class = '';
-                            $status_icon = '';
-                            
-                            switch ($status) {
-                                case 'created':
-                                    $status_class = 'status-created';
-                                    $status_icon = '✅';
-                                    break;
-                                case 'existing':
-                                    $status_class = 'status-existing';
-                                    $status_icon = '🔄';
-                                    break;
-                                case 'cancelled':
-                                    $status_class = 'status-cancelled';
-                                    $status_icon = '🚫';
-                                    break;
-                                case 'error':
-                                    $status_class = 'status-error';
-                                    $status_icon = '❌';
-                                    break;
-                                case 'skipped':
-                                    $status_class = 'status-skipped';
-                                    $status_icon = '⏭️';
-                                    break;
-                            }
-                            ?>
-                            
-                            <div class="user-log-entry <?php echo esc_attr($status_class); ?>">
-                                <div class="user-log-header">
-                                    <strong><?php echo $status_icon; ?> Action #<?php echo ($offset + $index + 1); ?></strong>
-                                    <span class="user-log-time"><?php echo esc_html($entry['datetime_readable']); ?></span>
-                                    <span class="badge badge-status"><?php echo esc_html(ucfirst($status)); ?></span>
-                                </div>
-                                
-                                <div class="user-log-content">
-                                    <table class="user-info-table">
-                                        <tr>
-                                            <td><strong>Email:</strong></td>
-                                            <td><?php echo esc_html($result['email']); ?></td>
-                                        </tr>
-                                        <?php if (isset($result['username'])): ?>
-                                            <tr>
-                                                <td><strong>Username:</strong></td>
-                                                <td><?php echo esc_html($result['username']); ?></td>
-                                            </tr>
-                                        <?php endif; ?>
-                                        <tr>
-                                            <td><strong>User ID:</strong></td>
-                                            <td>
-                                                <?php if ($result['user_id']): ?>
-                                                    <a href="<?php echo admin_url('user-edit.php?user_id=' . $result['user_id']); ?>" target="_blank">
-                                                        #<?php echo esc_html($result['user_id']); ?>
-                                                    </a>
-                                                <?php else: ?>
-                                                    N/A
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                        <?php if (isset($result['roles'])): ?>
-                                            <tr>
-                                                <td><strong>Roles Assigned:</strong></td>
-                                                <td><?php echo esc_html(implode(', ', $result['roles'])); ?></td>
-                                            </tr>
-                                        <?php endif; ?>
-                                        <?php if (isset($result['roles_removed'])): ?>
-                                            <tr>
-                                                <td><strong>Roles Removed:</strong></td>
-                                                <td><?php echo esc_html(implode(', ', $result['roles_removed'])); ?></td>
-                                            </tr>
-                                        <?php endif; ?>
-                                        <?php if (isset($result['subscription_id'])): ?>
-                                            <tr>
-                                                <td><strong>Subscription ID:</strong></td>
-                                                <td><code><?php echo esc_html($result['subscription_id']); ?></code></td>
-                                            </tr>
-                                        <?php endif; ?>
-                                        <tr>
-                                            <td><strong>Password Email:</strong></td>
-                                            <td>
-                                                <?php if ($result['password_sent']): ?>
-                                                    <span style="color: #46b450;">✅ Sent</span>
-                                                <?php else: ?>
-                                                    <span style="color: #dc3232;">❌ Not Sent</span>
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Product:</strong></td>
-                                            <td><?php echo esc_html($entry['gumroad_data']['product_name']); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Price:</strong></td>
-                                            <td>$<?php echo number_format($entry['gumroad_data']['price'] / 100, 2); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Test Mode:</strong></td>
-                                            <td><?php echo ($entry['gumroad_data']['test'] === 'true') ? '🧪 Yes' : 'No'; ?></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Message:</strong></td>
-                                            <td><?php echo esc_html($result['message']); ?></td>
-                                        </tr>
-                                    </table>
-                                    
-                                    <details style="margin-top: 10px;">
-                                        <summary><strong>🔍 View Full Details</strong></summary>
-                                        <pre><?php echo esc_html(json_encode($entry, JSON_PRETTY_PRINT)); ?></pre>
-                                    </details>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                        
-                        <!-- Pagination -->
-                        <?php if ($total_pages > 1): ?>
-                            <div class="tablenav">
-                                <div class="tablenav-pages">
-                                    <span class="displaying-num"><?php echo $total_entries; ?> items</span>
-                                    <span class="pagination-links">
-                                        <?php
-                                        $base_url = admin_url('admin.php?page=gumroad-connect-users');
-                                        
-                                        if ($current_page > 1) {
-                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=1') . '">« First</a> ';
-                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . ($current_page - 1)) . '">‹ Previous</a> ';
-                                        }
-                                        
-                                        echo '<span class="paging-input">';
-                                        echo '<span class="tablenav-paging-text">';
-                                        echo $current_page . ' of <span class="total-pages">' . $total_pages . '</span>';
-                                        echo '</span>';
-                                        echo '</span> ';
-                                        
-                                        if ($current_page < $total_pages) {
-                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . ($current_page + 1)) . '">Next ›</a> ';
-                                            echo '<a class="button" href="' . esc_url($base_url . '&paged=' . $total_pages) . '">Last »</a>';
-                                        }
-                                        ?>
-                                    </span>
-                                </div>
-                            </div>
-                        <?php endif; ?>
-                    <?php endif; ?>
-                </div>
-                
-            </div>
-        </div>
-        <?php
-    }
-    
-    /**
-     * Subscription log page
-     */
-    public function subscription_log_page() {
-        // Handle clear log action
-        if (isset($_POST['clear_subscription_log']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'gumroad_clear_subscription_log')) {
-            delete_option($this->subscription_log_option);
-            echo '<div class="notice notice-success"><p>Subscription log cleared successfully!</p></div>';
-        }
-        
-        $subscription_log = get_option($this->subscription_log_option, array());
-        
-        ?>
-        <div class="wrap gumroad-connect-wrap">
-            <h1>🔄 Gumroad Connect - Subscription Log</h1>
-            
-            <div class="gumroad-connect-container">
-                
-                <div class="gumroad-card">
-                    <h2>📊 Subscription Events</h2>
-                    <p>This page shows all subscription-related events: creation, renewals, and cancellations.</p>
-                    
-                    <div style="margin-top: 20px;">
-                        <form method="post" style="display: inline;">
-                            <?php wp_nonce_field('gumroad_clear_subscription_log'); ?>
-                            <button type="submit" name="clear_subscription_log" class="button" onclick="return confirm('Are you sure you want to clear the subscription log?')">
-                                🗑️ Clear Subscription Log
-                            </button>
-                        </form>
-                        <button type="button" class="button button-primary" onclick="location.reload()">
-                            🔄 Refresh Page
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="gumroad-card">
-                    <h2>🔔 Recent Events (Last 200)</h2>
-                    
-                    <?php if (empty($subscription_log)): ?>
-                        <div class="no-pings">
-                            <p>🔍 No subscription events logged yet.</p>
-                            <p>Events will appear here when subscriptions are created, renewed, or cancelled.</p>
-                        </div>
-                    <?php else: ?>
-                        <?php foreach ($subscription_log as $index => $entry): ?>
-                            <?php 
-                            $event_type = $entry['event_type'];
-                            $status_class = '';
-                            $status_icon = '';
-                            
-                            switch ($event_type) {
-                                case 'created':
-                                    $status_class = 'status-created';
-                                    $status_icon = '✅';
-                                    break;
-                                case 'renewal':
-                                    $status_class = 'status-existing';
-                                    $status_icon = '🔄';
-                                    break;
-                                case 'cancelled':
-                                    $status_class = 'status-cancelled';
-                                    $status_icon = '🚫';
-                                    break;
-                            }
-                            ?>
-                            
-                            <div class="user-log-entry <?php echo esc_attr($status_class); ?>">
-                                <div class="user-log-header">
-                                    <strong><?php echo $status_icon; ?> Event #<?php echo ($index + 1); ?></strong>
-                                    <span class="user-log-time"><?php echo esc_html($entry['datetime_readable']); ?></span>
-                                    <span class="badge badge-status"><?php echo esc_html(ucfirst($event_type)); ?></span>
-                                </div>
-                                
-                                <div class="user-log-content">
-                                    <table class="user-info-table">
-                                        <tr>
-                                            <td><strong>Email:</strong></td>
-                                            <td><?php echo esc_html($entry['email']); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>User ID:</strong></td>
-                                            <td>
-                                                <a href="<?php echo admin_url('user-edit.php?user_id=' . $entry['user_id']); ?>" target="_blank">
-                                                    #<?php echo esc_html($entry['user_id']); ?>
-                                                </a>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Subscription ID:</strong></td>
-                                            <td><code><?php echo esc_html($entry['subscription_id']); ?></code></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Product:</strong></td>
-                                            <td><?php echo esc_html($entry['product_name']); ?> <code style="margin-left: 10px;"><?php echo esc_html($entry['product_id']); ?></code></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Recurrence:</strong></td>
-                                            <td><?php echo esc_html($entry['recurrence'] ? $entry['recurrence'] : 'N/A'); ?></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Sale ID:</strong></td>
-                                            <td><code><?php echo esc_html($entry['sale_id']); ?></code></td>
-                                        </tr>
-                                    </table>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
                 
@@ -3487,4 +3118,3 @@ class Gumroad_Connect {
 
 // Initialize the plugin
 new Gumroad_Connect();
-
