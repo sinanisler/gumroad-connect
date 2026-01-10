@@ -1,14 +1,13 @@
 # Gumroad Connect
 
 
-**If you saved time and money with this project. Support it 😉**
 
 [![Sponsor me](https://img.shields.io/badge/Consider_Supporting_My_Projects_❤-GitHub-d46)](https://github.com/sponsors/sinanisler)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sinanisler/gumroad-connect)
 
 Connect WordPress with Gumroad webhooks to automatically create user accounts and manage subscriptions.
 
-> NOTE: This plugin only works with PING/Webhook methodology so I would recommend using this plugin only if you have simple product types. If you will sell recurring products or monthly memberships or yearly memberships and complex products use my other [Gumroad API](https://github.com/sinanisler/gumroad-api) plugin.
+> NOTE: This plugin only works with PING/Webhook methodology so I would recommend using this plugin only if you have simple product types. If you will sell recurring products or monthly memberships or yearly memberships and complex products use my other [Gumroad API](https://github.com/sinanisler/gumroad-api) plugin ❗
 
 ## Features
 
